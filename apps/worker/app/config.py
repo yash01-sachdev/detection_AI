@@ -15,6 +15,7 @@ class Settings(BaseSettings):
     yolo_model: str = "yolov8n.pt"
     frame_stride: int = 5
     confidence_threshold: float = 0.4
+    alert_cooldown_seconds: int = 12
 
     model_config = SettingsConfigDict(
         env_file=".env",
@@ -26,4 +27,3 @@ class Settings(BaseSettings):
 @lru_cache
 def get_settings() -> Settings:
     return Settings()
-

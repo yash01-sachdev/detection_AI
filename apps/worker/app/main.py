@@ -16,6 +16,7 @@ def main() -> None:
         detector=build_detector(settings),
         api_client=ApiClient(settings),
         frame_stride=settings.frame_stride,
+        alert_cooldown_seconds=settings.alert_cooldown_seconds,
     )
     pipeline.run()
 

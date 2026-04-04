@@ -1,4 +1,5 @@
 import logging
+from time import monotonic
 from typing import Any
 
 from app.camera import BaseCameraSource
@@ -38,14 +39,17 @@ class MonitoringPipeline:
         detector: BaseDetector,
         api_client: ApiClient,
         frame_stride: int,
+        alert_cooldown_seconds: int,
     ) -> None:
         self.source = source
         self.detector = detector
         self.api_client = api_client
         self.frame_stride = max(frame_stride, 1)
+        self.alert_cooldown_seconds = max(alert_cooldown_seconds, 1)
         self.tracker = SimpleFrameTracker()
         self.face_recognizer = NoopFaceRecognizer()
         self.posture_analyzer = NoopPostureAnalyzer()
+        self.last_sent_at: dict[str, float] = {}
 
     def run(self) -> None:
         frame_count = 0
@@ -69,6 +73,8 @@ class MonitoringPipeline:
                 detections = self.posture_analyzer.annotate(frame, detections)
 
                 for detection in detections:
+                    if not self._should_publish(detection):
+                        continue
                     try:
                         self.api_client.ingest_detection(detection)
                     except Exception as exc:  # pragma: no cover
@@ -80,3 +86,13 @@ class MonitoringPipeline:
             self.source.release()
             logger.info("Camera source released.")
 
+    def _should_publish(self, detection: Detection) -> bool:
+        center_x = int((detection.bbox.x1 + detection.bbox.x2) / 2)
+        center_y = int((detection.bbox.y1 + detection.bbox.y2) / 2)
+        key = f"{detection.entity_type}:{center_x // 80}:{center_y // 80}"
+        now = monotonic()
+        last_sent = self.last_sent_at.get(key)
+        if last_sent is not None and now - last_sent < self.alert_cooldown_seconds:
+            return False
+        self.last_sent_at[key] = now
+        return True
