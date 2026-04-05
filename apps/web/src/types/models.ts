@@ -63,6 +63,8 @@ export type EmployeeReportTotals = {
   violation_count: number
   zone_visit_count: number
   days_observed: number
+  inactivity_event_count: number
+  longest_inactivity_seconds: number
 }
 
 export type EmployeeDaySummary = {
@@ -73,6 +75,7 @@ export type EmployeeDaySummary = {
   sighting_count: number
   alert_count: number
   violation_count: number
+  inactivity_event_count: number
   top_zones: EmployeeZoneVisitStat[]
 }
 
@@ -85,6 +88,8 @@ export type EmployeeTimelineItem = {
   camera_name: string | null
   severity: string | null
   status: string | null
+  posture: string | null
+  inactive_seconds: number | null
 }
 
 export type EmployeeReport = {

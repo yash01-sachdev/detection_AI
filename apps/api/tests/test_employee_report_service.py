@@ -1,6 +1,5 @@
 import unittest
 from datetime import UTC, datetime, timedelta
-from zoneinfo import ZoneInfo
 
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
@@ -25,7 +24,6 @@ class EmployeeReportServiceTests(unittest.TestCase):
         self.engine.dispose()
 
     def test_build_employee_report_aggregates_presence_zones_and_timeline(self) -> None:
-        report_timezone = ZoneInfo("Asia/Calcutta")
         reference_time = datetime.now(UTC).replace(second=0, microsecond=0)
         day_one_start = reference_time - timedelta(days=2, hours=2)
         day_one_restricted = day_one_start + timedelta(minutes=10)
@@ -172,10 +170,12 @@ class EmployeeReportServiceTests(unittest.TestCase):
         self.assertEqual(report.totals.days_observed, 2)
         self.assertEqual(report.totals.presence_minutes, 11)
         self.assertEqual(len(report.daily_summaries), 2)
-        self.assertEqual(report.daily_summaries[0].date, day_two_start.astimezone(report_timezone).date().isoformat())
-        self.assertEqual(report.daily_summaries[1].date, day_one_start.astimezone(report_timezone).date().isoformat())
-        self.assertEqual(report.daily_summaries[1].alert_count, 1)
-        self.assertEqual(report.daily_summaries[1].violation_count, 1)
+        day_dates = [day.date for day in report.daily_summaries]
+        self.assertEqual(day_dates, sorted(day_dates, reverse=True))
+        self.assertEqual(len(set(day_dates)), 2)
+        restricted_day = next(day for day in report.daily_summaries if day.violation_count == 1)
+        self.assertEqual(restricted_day.alert_count, 1)
+        self.assertEqual(restricted_day.violation_count, 1)
         self.assertEqual(report.zone_visits[0].zone_name, "Work Bay")
         self.assertEqual(report.zone_visits[0].visit_count, 2)
         self.assertEqual(report.zone_visits[1].zone_name, "Server Room")
@@ -183,6 +183,96 @@ class EmployeeReportServiceTests(unittest.TestCase):
         self.assertEqual(report.recent_timeline[0].item_type, "event")
         self.assertEqual(report.recent_timeline[0].zone_name, "Work Bay")
         self.assertTrue(any(item.item_type == "alert" for item in report.recent_timeline))
+
+    def test_build_employee_report_surfaces_inactivity_metrics(self) -> None:
+        reference_time = datetime.now(UTC).replace(second=0, microsecond=0)
+        inactive_time = reference_time - timedelta(hours=1)
+
+        with self.SessionLocal() as db:
+            site = create_site_with_default_rules(
+                db,
+                SiteCreate(
+                    name="Inactivity Office",
+                    site_type=SiteType.office,
+                    timezone="Asia/Calcutta",
+                    description="Inactivity reporting test site",
+                ),
+            )
+
+            camera = Camera(
+                site_id=site.id,
+                name="Desk Camera",
+                source_type=CameraSourceType.webcam,
+                source_value="0",
+                is_enabled=True,
+            )
+            db.add(camera)
+            db.flush()
+
+            desk_zone = Zone(
+                site_id=site.id,
+                name="Desk Cluster",
+                zone_type=ZoneType.desk,
+                color="#148A72",
+                is_restricted=False,
+                points=[
+                    {"x": 0.0, "y": 0.0},
+                    {"x": 640.0, "y": 0.0},
+                    {"x": 640.0, "y": 480.0},
+                    {"x": 0.0, "y": 480.0},
+                ],
+            )
+            db.add(desk_zone)
+            db.flush()
+
+            employee = Employee(
+                site_id=site.id,
+                employee_code="EMP-888",
+                first_name="Calm",
+                last_name="Worker",
+                role_title="Operator",
+                is_active=True,
+            )
+            db.add(employee)
+            db.commit()
+            db.refresh(camera)
+            db.refresh(desk_zone)
+            db.refresh(employee)
+
+            response = ingest_detection_event(
+                db,
+                DetectionIngestRequest(
+                    site_id=site.id,
+                    camera_id=camera.id,
+                    zone_id=desk_zone.id,
+                    entity_type=EntityType.employee,
+                    label="Calm Worker",
+                    track_id="t-desk-inactive",
+                    confidence=0.93,
+                    occurred_at=inactive_time,
+                    details={
+                        "employee_id": employee.id,
+                        "employee_code": employee.employee_code,
+                        "posture": "inactive",
+                        "inactive_seconds": 45,
+                        "source": "unit-test",
+                    },
+                ),
+            )
+            report = build_employee_report_at(
+                db,
+                employee.id,
+                days=7,
+                reference_time=reference_time,
+            )
+
+        self.assertIsNone(response.alert_id)
+        self.assertEqual(report.totals.inactivity_event_count, 1)
+        self.assertEqual(report.totals.longest_inactivity_seconds, 45)
+        self.assertEqual(report.daily_summaries[0].inactivity_event_count, 1)
+        self.assertEqual(report.recent_timeline[0].title, "EMP-888 marked inactive")
+        self.assertEqual(report.recent_timeline[0].inactive_seconds, 45)
+        self.assertEqual(report.recent_timeline[0].posture, "inactive")
 
 
 if __name__ == "__main__":

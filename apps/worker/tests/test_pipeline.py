@@ -181,6 +181,54 @@ class PipelineTests(unittest.TestCase):
             self.assertTrue(pipeline._should_publish(upgraded))
             self.assertFalse(pipeline._should_publish(upgraded))
 
+    def test_publish_logic_sends_inactivity_transition_once_until_reset(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            pipeline = MonitoringPipeline(
+                source=DummySource(),
+                detector=DummyDetector(),
+                api_client=DummyClient(),
+                frame_stride=1,
+                alert_cooldown_seconds=3,
+                worker_name="unit-test-worker",
+                camera_source_type="test",
+                camera_source="test",
+                preview_output_dir=temp_dir,
+                snapshot_output_dir=temp_dir,
+            )
+
+            first = Detection(
+                label="person",
+                entity_type="employee",
+                confidence=0.92,
+                bbox=BoundingBox(x1=10, y1=10, x2=110, y2=210),
+                track_id="t1",
+                details={"track_is_new": True, "employee_id": "employee-1"},
+            )
+            inactive = first.model_copy(
+                update={
+                    "posture": "inactive",
+                    "details": {
+                        "track_is_new": False,
+                        "employee_id": "employee-1",
+                        "inactive_seconds": 24,
+                    },
+                }
+            )
+            resumed = first.model_copy(
+                update={
+                    "details": {
+                        "track_is_new": False,
+                        "employee_id": "employee-1",
+                    }
+                }
+            )
+
+            self.assertTrue(pipeline._should_publish(first))
+            self.assertTrue(pipeline._should_publish(inactive))
+            self.assertFalse(pipeline._should_publish(inactive))
+            self.assertFalse(pipeline._should_publish(resumed))
+            self.assertTrue(pipeline._should_publish(inactive))
+
 
 if __name__ == "__main__":
     unittest.main()

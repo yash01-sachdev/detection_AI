@@ -82,6 +82,8 @@ def build_employee_report_at(
             violation_count=sum(1 for alert in alerts if _is_violation_alert(alert)),
             zone_visit_count=sum(zone.visit_count for zone in zone_visits),
             days_observed=sum(1 for day in day_summaries if day.sighting_count > 0),
+            inactivity_event_count=sum(1 for event in events if _event_is_inactive(event)),
+            longest_inactivity_seconds=max((_event_inactive_seconds(event) for event in events), default=0),
         ),
         zone_visits=zone_visits,
         daily_summaries=day_summaries,
@@ -199,6 +201,7 @@ def _build_day_summaries(
                 sighting_count=len(day_events),
                 alert_count=len(day_alerts),
                 violation_count=sum(1 for alert in day_alerts if _is_violation_alert(alert)),
+                inactivity_event_count=sum(1 for event in day_events if _event_is_inactive(event)),
                 top_zones=zone_visits[:3],
             )
         )
@@ -238,16 +241,25 @@ def _build_recent_timeline(
 
     for alert in alerts:
         details = dict(alert.details or {})
+        posture = _normalize_posture(details.get("posture"))
+        inactive_seconds = _coerce_int(details.get("inactive_seconds"))
         timeline_items.append(
             EmployeeTimelineItem(
                 item_type="alert",
                 occurred_at=alert.occurred_at.astimezone(timezone),
                 title=alert.title,
-                description=alert.description or "Alert created.",
+                description=_build_timeline_description(
+                    zone_name=str(details.get("zone_name") or "").strip(),
+                    posture=posture,
+                    inactive_seconds=inactive_seconds,
+                    fallback=alert.description or "Alert created.",
+                ),
                 zone_name=str(details.get("zone_name") or "").strip() or None,
                 camera_name=cameras.get(alert.camera_id).name if alert.camera_id in cameras else None,
                 severity=alert.severity.value,
                 status=alert.status.value,
+                posture=posture,
+                inactive_seconds=inactive_seconds,
             )
         )
 
@@ -255,18 +267,27 @@ def _build_recent_timeline(
         details = dict(event.details or {})
         subject = str(details.get("employee_code") or details.get("identity") or event.label).strip()
         zone_name = str(details.get("zone_name") or "").strip()
+        posture = _normalize_posture(details.get("posture"))
+        inactive_seconds = _coerce_int(details.get("inactive_seconds"))
         timeline_items.append(
             EmployeeTimelineItem(
                 item_type="event",
                 occurred_at=event.occurred_at.astimezone(timezone),
-                title=f"{subject} detected",
-                description=(
-                    f"Seen in {zone_name}."
-                    if zone_name
-                    else "Seen by the monitoring worker."
+                title=_build_event_title(subject, posture),
+                description=_build_timeline_description(
+                    zone_name=zone_name,
+                    posture=posture,
+                    inactive_seconds=inactive_seconds,
+                    fallback=(
+                        f"Seen in {zone_name}."
+                        if zone_name
+                        else "Seen by the monitoring worker."
+                    ),
                 ),
                 zone_name=zone_name or None,
                 camera_name=cameras.get(event.camera_id).name if event.camera_id in cameras else None,
+                posture=posture,
+                inactive_seconds=inactive_seconds,
             )
         )
 
@@ -283,3 +304,46 @@ def _is_violation_alert(alert: Alert) -> bool:
 
 def _local_day_key(value: datetime, timezone: ZoneInfo) -> str:
     return value.astimezone(timezone).date().isoformat()
+
+
+def _event_is_inactive(event: Event) -> bool:
+    details = dict(event.details or {})
+    return _normalize_posture(details.get("posture")) == "inactive"
+
+
+def _event_inactive_seconds(event: Event) -> int:
+    details = dict(event.details or {})
+    return _coerce_int(details.get("inactive_seconds"))
+
+
+def _build_event_title(subject: str, posture: str | None) -> str:
+    if posture == "inactive":
+        return f"{subject} marked inactive"
+    return f"{subject} detected"
+
+
+def _build_timeline_description(
+    *,
+    zone_name: str,
+    posture: str | None,
+    inactive_seconds: int,
+    fallback: str,
+) -> str:
+    if posture == "inactive":
+        zone_label = zone_name or "the monitored area"
+        if inactive_seconds > 0:
+            return f"No meaningful movement for {inactive_seconds} seconds in {zone_label}."
+        return f"No meaningful movement detected in {zone_label}."
+    return fallback
+
+
+def _normalize_posture(value: object) -> str | None:
+    posture = str(value or "").strip().lower()
+    return posture or None
+
+
+def _coerce_int(value: object) -> int:
+    try:
+        return max(int(value or 0), 0)
+    except (TypeError, ValueError):
+        return 0

@@ -108,6 +108,8 @@ class EmployeeReportTotals(BaseModel):
     violation_count: int
     zone_visit_count: int
     days_observed: int
+    inactivity_event_count: int = 0
+    longest_inactivity_seconds: int = 0
 
 
 class EmployeeDaySummary(BaseModel):
@@ -118,6 +120,7 @@ class EmployeeDaySummary(BaseModel):
     sighting_count: int = 0
     alert_count: int = 0
     violation_count: int = 0
+    inactivity_event_count: int = 0
     top_zones: list[EmployeeZoneVisitStat] = Field(default_factory=list)
 
 
@@ -130,6 +133,8 @@ class EmployeeTimelineItem(BaseModel):
     camera_name: str | None = None
     severity: str | None = None
     status: str | None = None
+    posture: str | None = None
+    inactive_seconds: int | None = None
 
 
 class EmployeeReportRead(BaseModel):

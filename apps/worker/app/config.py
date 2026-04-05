@@ -21,6 +21,8 @@ class Settings(BaseSettings):
     face_model_dir: str = "../../models/opencv"
     face_profile_refresh_seconds: int = 60
     face_match_threshold: float = 0.45
+    inactivity_threshold_seconds: int = 20
+    inactivity_movement_threshold_px: float = 24.0
 
     model_config = SettingsConfigDict(
         env_file=".env",

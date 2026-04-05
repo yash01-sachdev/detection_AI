@@ -46,6 +46,19 @@ function formatMinutes(minutes: number) {
   return `${hours} hr ${remainingMinutes} min`
 }
 
+function formatSeconds(seconds: number) {
+  if (seconds < 60) {
+    return `${seconds} sec`
+  }
+
+  const minutes = Math.floor(seconds / 60)
+  const remainingSeconds = seconds % 60
+  if (!remainingSeconds) {
+    return `${minutes} min`
+  }
+  return `${minutes} min ${remainingSeconds} sec`
+}
+
 function renderZoneVisits(zoneVisits: EmployeeZoneVisitStat[]) {
   if (!zoneVisits.length) {
     return 'No zone visits yet'
@@ -67,6 +80,7 @@ function renderDaySummary(day: EmployeeDaySummary) {
         <p>
           Presence: {formatMinutes(day.presence_minutes)} | Sightings: {day.sighting_count} | Alerts: {day.alert_count}
         </p>
+        <small>Inactive periods: {day.inactivity_event_count}</small>
         <small>
           First seen: {formatDateTime(day.first_seen_at)} | Last seen: {formatDateTime(day.last_seen_at)}
         </small>
@@ -408,6 +422,14 @@ export function EmployeesPage() {
                 <p>Observed Days</p>
                 <strong>{report.totals.days_observed}</strong>
               </article>
+              <article className="stat-card">
+                <p>Inactive Periods</p>
+                <strong>{report.totals.inactivity_event_count}</strong>
+              </article>
+              <article className="stat-card">
+                <p>Longest Inactive</p>
+                <strong>{formatSeconds(report.totals.longest_inactivity_seconds)}</strong>
+              </article>
             </div>
 
             <div className="page-grid page-grid--two-up">
@@ -438,6 +460,7 @@ export function EmployeesPage() {
                           <strong>{item.title}</strong>
                           <p>{item.description}</p>
                           <small>{renderTimelineMeta(item)}</small>
+                          {item.inactive_seconds ? <small>Inactive duration: {formatSeconds(item.inactive_seconds)}</small> : null}
                           <small>{formatDateTime(item.occurred_at)}</small>
                         </div>
                         <div className="stack-sm align-end">

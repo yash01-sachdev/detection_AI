@@ -375,13 +375,15 @@ def _build_alert_data(
     details: dict[str, object],
     matched_rule: Rule | None,
 ) -> dict[str, Any] | None:
-    if matched_rule is not None and matched_rule.actions.get("create_alert"):
-        return {
-            "title": matched_rule.name,
-            "description": _build_rule_alert_description(matched_rule, payload, zone),
-            "severity": matched_rule.severity,
-            "rule_id": matched_rule.id,
-        }
+    if matched_rule is not None:
+        if matched_rule.actions.get("create_alert"):
+            return {
+                "title": matched_rule.name,
+                "description": _build_rule_alert_description(matched_rule, payload, zone),
+                "severity": matched_rule.severity,
+                "rule_id": matched_rule.id,
+            }
+        return None
 
     if payload.alert_title:
         return {

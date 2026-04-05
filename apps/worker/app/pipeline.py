@@ -3,7 +3,7 @@ import json
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
-from time import monotonic, sleep
+from time import sleep
 from typing import Any
 
 from app.camera import BaseCameraSource
@@ -137,6 +137,7 @@ class MonitoringPipeline:
         preview_output_dir: str,
         snapshot_output_dir: str,
         face_recognizer: Any | None = None,
+        posture_analyzer: Any | None = None,
     ) -> None:
         self.source = source
         self.detector = detector
@@ -145,8 +146,8 @@ class MonitoringPipeline:
         self.alert_cooldown_seconds = max(alert_cooldown_seconds, 1)
         self.tracker = StableTracker()
         self.face_recognizer = face_recognizer or NoopFaceRecognizer()
-        self.posture_analyzer = NoopPostureAnalyzer()
-        self.last_sent_at: dict[str, dict[str, float | str]] = {}
+        self.posture_analyzer = posture_analyzer or NoopPostureAnalyzer()
+        self.track_state: dict[str, dict[str, str]] = {}
         self.worker_name = worker_name
         self.camera_source_type = camera_source_type
         self.camera_source = camera_source
@@ -187,8 +188,8 @@ class MonitoringPipeline:
                 detections = self.detector.detect(frame)
                 detections = self.tracker.assign_tracks(detections)
                 detections = self.face_recognizer.annotate(frame, detections)
-                detections = self.posture_analyzer.annotate(frame, detections)
                 detections = self._assign_zones(detections)
+                detections = self.posture_analyzer.annotate(frame, detections)
                 self._persist_preview(frame, detections, frame_count)
 
                 for detection in detections:
@@ -249,27 +250,40 @@ class MonitoringPipeline:
             return False
 
         key = detection.track_id
-        now = monotonic()
         zone_id = detection.zone_id or ""
         entity_key = _build_entity_key(detection)
-        last_sent = self.last_sent_at.get(key)
-        if last_sent is None:
-            self.last_sent_at[key] = {"at": now, "zone_id": zone_id, "entity_key": entity_key}
+        posture = detection.posture or ""
+        last_state = self.track_state.get(key)
+
+        current_state = {
+            "zone_id": zone_id,
+            "entity_key": entity_key,
+            "posture": posture,
+        }
+
+        if last_state is None:
+            self.track_state[key] = current_state
             return True
 
-        last_zone_id = str(last_sent.get("zone_id", ""))
-        last_entity_key = str(last_sent.get("entity_key", ""))
+        last_zone_id = str(last_state.get("zone_id", ""))
+        last_entity_key = str(last_state.get("entity_key", ""))
+        last_posture = str(last_state.get("posture", ""))
+
         if entity_key and entity_key != last_entity_key:
-            self.last_sent_at[key] = {"at": now, "zone_id": zone_id, "entity_key": entity_key}
+            self.track_state[key] = current_state
             return True
 
         if zone_id and zone_id != last_zone_id:
-            self.last_sent_at[key] = {"at": now, "zone_id": zone_id, "entity_key": entity_key}
+            self.track_state[key] = current_state
             return True
 
+        if posture != last_posture:
+            self.track_state[key] = current_state
+            return bool(posture)
+
+        self.track_state[key] = current_state
         if not detection.details.get("track_is_new", False):
             return False
-        self.last_sent_at[key] = {"at": now, "zone_id": zone_id, "entity_key": entity_key}
         return True
 
     def _refresh_zones(self, force: bool = False) -> None:
@@ -331,10 +345,15 @@ class MonitoringPipeline:
 
         for detection in detections:
             zone_name = str(detection.details.get("zone_name", "")).strip()
+            posture = detection.posture or ""
+            posture_suffix = ""
+            if posture == "inactive":
+                inactive_seconds = int(detection.details.get("inactive_seconds") or 0)
+                posture_suffix = f" ({inactive_seconds}s inactive)" if inactive_seconds else " (inactive)"
             labels.append(
-                f"{detection.identity or detection.label} @ {zone_name}"
+                f"{detection.identity or detection.label}{posture_suffix} @ {zone_name}"
                 if zone_name
-                else (detection.identity or detection.label)
+                else f"{detection.identity or detection.label}{posture_suffix}"
             )
             x1 = int(detection.bbox.x1)
             y1 = int(detection.bbox.y1)
@@ -344,6 +363,9 @@ class MonitoringPipeline:
             caption = f"{(detection.identity or detection.label).title()} {int(detection.confidence * 100)}%"
             if zone_name:
                 caption = f"{caption} | {zone_name}"
+            if posture == "inactive":
+                inactive_seconds = int(detection.details.get("inactive_seconds") or 0)
+                caption = f"{caption} | inactive {inactive_seconds}s" if inactive_seconds else f"{caption} | inactive"
             cv2.putText(
                 preview_frame,
                 caption,
@@ -412,6 +434,9 @@ class MonitoringPipeline:
         caption = f"{(detection.identity or detection.label).title()} {int(detection.confidence * 100)}%"
         if zone_name:
             caption = f"{caption} | {zone_name}"
+        if detection.posture == "inactive":
+            inactive_seconds = int(detection.details.get("inactive_seconds") or 0)
+            caption = f"{caption} | inactive {inactive_seconds}s" if inactive_seconds else f"{caption} | inactive"
 
         cv2.putText(
             snapshot,
