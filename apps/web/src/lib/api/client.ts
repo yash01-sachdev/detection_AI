@@ -1,4 +1,4 @@
-const API_BASE_URL =
+export const API_BASE_URL =
   import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:8000/api/v1'
 
 let authToken: string | null = null
@@ -49,4 +49,3 @@ export async function apiRequest<T>(
 
   return (await response.json()) as T
 }
-

@@ -39,8 +39,27 @@ storage/
 - event ingest endpoint for the worker
 - alert history and dashboard overview
 - worker scaffold for webcam and DroidCam camera sources
+- live camera preview for debugging the worker feed
+- zone-aware event assignment with rule-based alerts
 
 ## Local Startup
+
+### Fastest Dev Flow
+
+Use the helper script from the repo root:
+
+```powershell
+cd F:\detection-ai
+.\scripts\dev.ps1 start
+```
+
+Useful commands:
+
+```powershell
+.\scripts\dev.ps1 status
+.\scripts\dev.ps1 verify
+.\scripts\dev.ps1 stop
+```
 
 ### 1. Infrastructure
 
@@ -96,7 +115,7 @@ Set-Content .env
 python -m app.main
 ```
 
-DroidCam stream:
+DroidCam direct stream on the same Wi-Fi:
 
 ```powershell
 cd F:\detection-ai\apps\worker
@@ -107,6 +126,14 @@ cd F:\detection-ai\apps\worker
 Set-Content .env
 python -m app.main
 ```
+
+Recommended flow for DroidCam:
+
+1. Open the DroidCam app on your phone.
+2. Keep the phone and laptop on the same Wi-Fi.
+3. Use the phone IP shown by DroidCam in `CAMERA_SOURCE`.
+4. Open `http://127.0.0.1:5173/live` to confirm the worker sees the real feed.
+5. Open `http://127.0.0.1:5173/alerts` to watch the saved alerts.
 
 Before starting the worker for live ingest, create a site and camera in the dashboard and copy their IDs into:
 
@@ -119,3 +146,29 @@ Before starting the worker for live ingest, create a site and camera in the dash
 - Password: `Admin12345!`
 
 Change these values in `apps/api/.env` before using the project beyond local development.
+
+## Verification
+
+Run the local checks:
+
+```powershell
+cd F:\detection-ai
+.\scripts\dev.ps1 verify
+```
+
+This runs:
+
+- Python compile checks
+- API unit tests
+- Worker unit tests
+- Web lint
+- Web production build
+
+## Local Hostnames
+
+For local development, `localhost` and `127.0.0.1` are both accepted by the API CORS config.
+
+Examples:
+
+- Web: `http://localhost:5173` or `http://127.0.0.1:5173`
+- API: `http://localhost:8000` or `http://127.0.0.1:8000`

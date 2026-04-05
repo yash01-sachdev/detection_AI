@@ -10,6 +10,20 @@ class BoundingBox(BaseModel):
     y2: float
 
 
+class ZonePoint(BaseModel):
+    x: float
+    y: float
+
+
+class ZoneDefinition(BaseModel):
+    id: str
+    name: str
+    zone_type: str
+    color: str
+    is_restricted: bool
+    points: list[ZonePoint] = Field(default_factory=list)
+
+
 class Detection(BaseModel):
     label: str
     entity_type: str
@@ -25,4 +39,3 @@ class Detection(BaseModel):
 class FrameAnalysis(BaseModel):
     captured_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
     detections: list[Detection] = Field(default_factory=list)
-

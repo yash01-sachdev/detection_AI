@@ -2,6 +2,7 @@ import { NavLink } from 'react-router-dom'
 
 const NAV_ITEMS = [
   { to: '/dashboard', label: 'Overview' },
+  { to: '/live', label: 'Live' },
   { to: '/modes', label: 'Modes' },
   { to: '/sites', label: 'Sites' },
   { to: '/cameras', label: 'Cameras' },
@@ -42,4 +43,3 @@ export function Sidebar() {
     </aside>
   )
 }
-

@@ -1,4 +1,5 @@
 from datetime import UTC, datetime
+from typing import Any
 
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
@@ -155,8 +156,25 @@ def build_dashboard_overview(db: Session) -> DashboardOverview:
     return DashboardOverview(stats=stats, recent_alerts=recent_alerts)
 
 
+def list_site_zones(db: Session, site_id: str) -> list[Zone]:
+    return list(
+        db.scalars(
+            select(Zone)
+            .where(Zone.site_id == site_id)
+            .order_by(Zone.created_at.asc())
+        )
+    )
+
+
 def ingest_detection_event(db: Session, payload: DetectionIngestRequest) -> DetectionIngestResponse:
     occurred_at = payload.occurred_at or datetime.now(UTC)
+    zone = db.get(Zone, payload.zone_id) if payload.zone_id else None
+    details = dict(payload.details)
+    if zone is not None:
+        details.setdefault("zone_name", zone.name)
+        details.setdefault("zone_type", zone.zone_type.value)
+        details.setdefault("zone_restricted", zone.is_restricted)
+
     event = Event(
         site_id=payload.site_id,
         camera_id=payload.camera_id,
@@ -166,25 +184,33 @@ def ingest_detection_event(db: Session, payload: DetectionIngestRequest) -> Dete
         track_id=payload.track_id,
         confidence=payload.confidence,
         occurred_at=occurred_at,
-        details=payload.details,
+        details=details,
     )
     db.add(event)
     db.flush()
 
+    matched_rule = _find_matching_rule(db, payload.site_id, payload, zone, details)
+    alert_data = _build_alert_data(
+        payload=payload,
+        zone=zone,
+        details=details,
+        matched_rule=matched_rule,
+    )
+
     alert_id: str | None = None
-    if payload.alert_title:
+    if alert_data is not None:
         alert = Alert(
             site_id=payload.site_id,
             camera_id=payload.camera_id,
-            rule_id=payload.rule_id,
+            rule_id=alert_data["rule_id"],
             event_id=event.id,
-            title=payload.alert_title,
-            description=payload.alert_description or "",
-            severity=payload.severity,
+            title=alert_data["title"],
+            description=alert_data["description"],
+            severity=alert_data["severity"],
             status=AlertStatus.open,
             snapshot_path=payload.snapshot_path,
             occurred_at=occurred_at,
-            details=payload.details,
+            details=details,
         )
         db.add(alert)
         db.flush()
@@ -193,3 +219,117 @@ def ingest_detection_event(db: Session, payload: DetectionIngestRequest) -> Dete
     db.commit()
     return DetectionIngestResponse(event_id=event.id, alert_id=alert_id)
 
+
+def _find_matching_rule(
+    db: Session,
+    site_id: str,
+    payload: DetectionIngestRequest,
+    zone: Zone | None,
+    details: dict[str, object],
+) -> Rule | None:
+    rules = list(
+        db.scalars(
+            select(Rule)
+            .where(Rule.site_id == site_id, Rule.is_enabled.is_(True))
+            .order_by(Rule.is_default.desc(), Rule.created_at.asc())
+        )
+    )
+
+    for rule in rules:
+        if _rule_matches(rule, payload, zone, details):
+            return rule
+
+    return None
+
+
+def _rule_matches(
+    rule: Rule,
+    payload: DetectionIngestRequest,
+    zone: Zone | None,
+    details: dict[str, object],
+) -> bool:
+    zone_type = zone.zone_type.value if zone is not None else None
+    actual_values = {
+        "entity_type": _normalize_value(payload.entity_type),
+        "zone_type": zone_type,
+        "posture": details.get("posture"),
+        "label": payload.label,
+        "zone_restricted": zone.is_restricted if zone is not None else None,
+    }
+
+    for key, expected in rule.conditions.items():
+        actual = actual_values.get(key)
+        if isinstance(expected, list):
+            if actual not in expected:
+                return False
+            continue
+        if actual != expected:
+            return False
+
+    return True
+
+
+def _build_alert_data(
+    *,
+    payload: DetectionIngestRequest,
+    zone: Zone | None,
+    details: dict[str, object],
+    matched_rule: Rule | None,
+) -> dict[str, Any] | None:
+    if matched_rule is not None and matched_rule.actions.get("create_alert"):
+        return {
+            "title": matched_rule.name,
+            "description": _build_rule_alert_description(matched_rule, payload, zone),
+            "severity": matched_rule.severity,
+            "rule_id": matched_rule.id,
+        }
+
+    if payload.alert_title:
+        return {
+            "title": payload.alert_title,
+            "description": payload.alert_description
+            or _build_generic_alert_description(payload, zone, details),
+            "severity": payload.severity,
+            "rule_id": payload.rule_id,
+        }
+
+    return None
+
+
+def _build_rule_alert_description(
+    rule: Rule,
+    payload: DetectionIngestRequest,
+    zone: Zone | None,
+) -> str:
+    subject = payload.label.replace("_", " ").title()
+    confidence_pct = round(payload.confidence * 100)
+    if zone is not None:
+        return (
+            f"{subject} matched rule {rule.name} in zone {zone.name} "
+            f"({zone.zone_type.value}) with {confidence_pct}% confidence."
+        )
+    return f"{subject} matched rule {rule.name} with {confidence_pct}% confidence."
+
+
+def _build_generic_alert_description(
+    payload: DetectionIngestRequest,
+    zone: Zone | None,
+    details: dict[str, object],
+) -> str:
+    subject = payload.label.replace("_", " ")
+    confidence_pct = round(payload.confidence * 100)
+    if zone is not None:
+        return (
+            f"Live worker detected {subject} in zone {zone.name} "
+            f"({zone.zone_type.value}) with {confidence_pct}% confidence."
+        )
+    return (
+        f"Live worker detected {subject} on camera {payload.camera_id} "
+        f"with {confidence_pct}% confidence."
+    )
+
+
+def _normalize_value(value: object) -> object:
+    if hasattr(value, "value"):
+        return getattr(value, "value")
+    return value

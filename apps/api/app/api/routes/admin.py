@@ -1,3 +1,6 @@
+import json
+from pathlib import Path
+
 from fastapi import APIRouter, Depends, status
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -13,6 +16,7 @@ from app.schemas.monitoring import (
     CameraCreate,
     CameraRead,
     DashboardOverview,
+    LiveMonitorStatus,
     ModeTemplate,
     RuleCreate,
     RuleRead,
@@ -28,6 +32,9 @@ from app.services.monitoring_service import (
 )
 
 router = APIRouter()
+live_dir = Path(__file__).resolve().parents[5] / "storage" / "live"
+live_status_path = live_dir / "status.json"
+live_frame_path = live_dir / "latest_frame.jpg"
 
 
 @router.get("/modes/templates", response_model=list[ModeTemplate])
@@ -143,3 +150,19 @@ def get_dashboard_overview(
 ) -> DashboardOverview:
     return build_dashboard_overview(db)
 
+
+@router.get("/live/status", response_model=LiveMonitorStatus)
+def get_live_status(_: object = Depends(require_admin)) -> LiveMonitorStatus:
+    live_dir.mkdir(parents=True, exist_ok=True)
+
+    payload: dict[str, object] = {
+        "message": "Worker preview is not available yet.",
+        "camera_connected": False,
+    }
+    if live_status_path.exists():
+        payload.update(json.loads(live_status_path.read_text(encoding="utf-8")))
+
+    if live_frame_path.exists():
+        payload["frame_url"] = "/live-media/latest_frame.jpg"
+
+    return LiveMonitorStatus(**payload)

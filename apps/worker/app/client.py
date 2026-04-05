@@ -1,14 +1,27 @@
 import httpx
 
 from app.config import Settings
-from app.types import Detection
+from app.types import Detection, ZoneDefinition
 
 
 class ApiClient:
     def __init__(self, settings: Settings) -> None:
         self.settings = settings
 
-    def ingest_detection(self, detection: Detection) -> None:
+    def fetch_zones(self) -> list[ZoneDefinition]:
+        if not self.settings.site_id:
+            return []
+
+        with httpx.Client(timeout=10.0) as client:
+            response = client.get(
+                f"{self.settings.api_base_url}/ingest/sites/{self.settings.site_id}/zones",
+                headers={"x-internal-token": self.settings.api_internal_token},
+            )
+            response.raise_for_status()
+
+        return [ZoneDefinition.model_validate(item) for item in response.json()]
+
+    def ingest_detection(self, detection: Detection, snapshot_path: str | None = None) -> None:
         if not self.settings.site_id or not self.settings.camera_id:
             return
 
@@ -31,6 +44,7 @@ class ApiClient:
             "alert_title": alert_title,
             "alert_description": alert_description,
             "severity": "medium",
+            "snapshot_path": snapshot_path,
             "details": {
                 "bbox": detection.bbox.model_dump(),
                 "identity": detection.identity,

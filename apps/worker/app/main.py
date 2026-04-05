@@ -17,6 +17,11 @@ def main() -> None:
         api_client=ApiClient(settings),
         frame_stride=settings.frame_stride,
         alert_cooldown_seconds=settings.alert_cooldown_seconds,
+        worker_name=settings.worker_name,
+        camera_source_type=settings.camera_source_type,
+        camera_source=settings.camera_source,
+        preview_output_dir=settings.preview_output_dir,
+        snapshot_output_dir=settings.snapshot_output_dir,
     )
     pipeline.run()
 

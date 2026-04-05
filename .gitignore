@@ -15,5 +15,6 @@ apps/web/.vite/
 *.pt
 storage/snapshots/*
 storage/clips/*
+storage/live/*
 !storage/snapshots/.gitkeep
 !storage/clips/.gitkeep

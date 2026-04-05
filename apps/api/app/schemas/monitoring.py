@@ -139,6 +139,19 @@ class DashboardOverview(BaseModel):
     recent_alerts: list[AlertRead]
 
 
+class LiveMonitorStatus(BaseModel):
+    worker_name: str = ""
+    camera_source_type: str = ""
+    camera_source: str = ""
+    camera_connected: bool = False
+    frame_updated_at: datetime | None = None
+    frame_count: int = 0
+    last_detection_count: int = 0
+    last_labels: list[str] = Field(default_factory=list)
+    message: str = ""
+    frame_url: str | None = None
+
+
 class DetectionIngestRequest(BaseModel):
     site_id: str
     camera_id: str
@@ -159,4 +172,3 @@ class DetectionIngestRequest(BaseModel):
 class DetectionIngestResponse(BaseModel):
     event_id: str
     alert_id: str | None = None
-

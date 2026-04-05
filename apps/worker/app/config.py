@@ -14,8 +14,10 @@ class Settings(BaseSettings):
     detector_type: str = "mock"
     yolo_model: str = "yolov8n.pt"
     frame_stride: int = 5
-    confidence_threshold: float = 0.4
+    confidence_threshold: float = 0.55
     alert_cooldown_seconds: int = 12
+    preview_output_dir: str = "../../storage/live"
+    snapshot_output_dir: str = "../../storage/snapshots"
 
     model_config = SettingsConfigDict(
         env_file=".env",

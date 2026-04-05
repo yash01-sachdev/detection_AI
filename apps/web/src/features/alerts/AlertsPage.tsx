@@ -2,8 +2,10 @@ import { useEffect, useState } from 'react'
 
 import { EmptyState } from '../../components/shared/EmptyState'
 import { Panel } from '../../components/shared/Panel'
-import { apiRequest } from '../../lib/api/client'
+import { API_BASE_URL, apiRequest } from '../../lib/api/client'
 import type { Alert } from '../../types/models'
+
+const API_ROOT = API_BASE_URL.replace(/\/api\/v1\/?$/, '')
 
 export function AlertsPage() {
   const [alerts, setAlerts] = useState<Alert[]>([])
@@ -27,6 +29,13 @@ export function AlertsPage() {
         <div className="list">
           {alerts.map((alert) => (
             <article key={alert.id} className="list-row">
+              {alert.snapshot_path ? (
+                <img
+                  className="alert-thumbnail"
+                  src={`${API_ROOT}${alert.snapshot_path}`}
+                  alt={alert.title}
+                />
+              ) : null}
               <div>
                 <strong>{alert.title}</strong>
                 <p>{alert.description || 'No description provided.'}</p>
@@ -45,4 +54,3 @@ export function AlertsPage() {
     </Panel>
   )
 }
-

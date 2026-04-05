@@ -93,3 +93,15 @@ export type DashboardOverview = {
   recent_alerts: Alert[]
 }
 
+export type LiveMonitorStatus = {
+  worker_name: string
+  camera_source_type: string
+  camera_source: string
+  camera_connected: boolean
+  frame_updated_at: string | null
+  frame_count: number
+  last_detection_count: number
+  last_labels: string[]
+  message: string
+  frame_url: string | null
+}
