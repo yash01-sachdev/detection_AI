@@ -86,6 +86,64 @@ class EmployeeRead(BaseModel):
     model_config = {"from_attributes": True}
 
 
+class EmployeeReportSubject(BaseModel):
+    id: str
+    employee_code: str
+    full_name: str
+    role_title: str
+    site_id: str | None
+    site_name: str | None
+    timezone: str
+
+
+class EmployeeZoneVisitStat(BaseModel):
+    zone_name: str
+    visit_count: int
+
+
+class EmployeeReportTotals(BaseModel):
+    presence_minutes: int
+    sighting_count: int
+    alert_count: int
+    violation_count: int
+    zone_visit_count: int
+    days_observed: int
+
+
+class EmployeeDaySummary(BaseModel):
+    date: str
+    first_seen_at: datetime | None = None
+    last_seen_at: datetime | None = None
+    presence_minutes: int = 0
+    sighting_count: int = 0
+    alert_count: int = 0
+    violation_count: int = 0
+    top_zones: list[EmployeeZoneVisitStat] = Field(default_factory=list)
+
+
+class EmployeeTimelineItem(BaseModel):
+    item_type: str
+    occurred_at: datetime
+    title: str
+    description: str
+    zone_name: str | None = None
+    camera_name: str | None = None
+    severity: str | None = None
+    status: str | None = None
+
+
+class EmployeeReportRead(BaseModel):
+    employee: EmployeeReportSubject
+    generated_at: datetime
+    window_start: datetime
+    window_end: datetime
+    days: int
+    totals: EmployeeReportTotals
+    zone_visits: list[EmployeeZoneVisitStat] = Field(default_factory=list)
+    daily_summaries: list[EmployeeDaySummary] = Field(default_factory=list)
+    recent_timeline: list[EmployeeTimelineItem] = Field(default_factory=list)
+
+
 class ZonePoint(BaseModel):
     x: float
     y: float

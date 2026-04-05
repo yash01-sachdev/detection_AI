@@ -545,12 +545,37 @@ a {
   justify-content: flex-end;
 }
 
+.employee-card--selected {
+  border-color: rgba(26, 164, 132, 0.65);
+  background: rgba(26, 164, 132, 0.1);
+}
+
 .employee-face-thumb {
   width: 72px;
   height: 72px;
   object-fit: cover;
   border-radius: 0.85rem;
   border: 1px solid var(--border);
+}
+
+.report-hero {
+  padding: 1rem;
+  border-radius: 1rem;
+  border: 1px solid var(--border);
+  background:
+    radial-gradient(circle at top right, rgba(26, 164, 132, 0.12), transparent 35%),
+    var(--surface-soft);
+}
+
+.report-hero p,
+.report-hero small {
+  margin: 0;
+  color: var(--muted);
+}
+
+.report-hero strong {
+  display: block;
+  margin-bottom: 0.35rem;
 }
 
 .form-error {

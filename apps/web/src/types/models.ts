@@ -41,6 +41,64 @@ export type Employee = {
   face_profiles: EmployeeFaceProfile[]
 }
 
+export type EmployeeReportSubject = {
+  id: string
+  employee_code: string
+  full_name: string
+  role_title: string
+  site_id: string | null
+  site_name: string | null
+  timezone: string
+}
+
+export type EmployeeZoneVisitStat = {
+  zone_name: string
+  visit_count: number
+}
+
+export type EmployeeReportTotals = {
+  presence_minutes: number
+  sighting_count: number
+  alert_count: number
+  violation_count: number
+  zone_visit_count: number
+  days_observed: number
+}
+
+export type EmployeeDaySummary = {
+  date: string
+  first_seen_at: string | null
+  last_seen_at: string | null
+  presence_minutes: number
+  sighting_count: number
+  alert_count: number
+  violation_count: number
+  top_zones: EmployeeZoneVisitStat[]
+}
+
+export type EmployeeTimelineItem = {
+  item_type: string
+  occurred_at: string
+  title: string
+  description: string
+  zone_name: string | null
+  camera_name: string | null
+  severity: string | null
+  status: string | null
+}
+
+export type EmployeeReport = {
+  employee: EmployeeReportSubject
+  generated_at: string
+  window_start: string
+  window_end: string
+  days: number
+  totals: EmployeeReportTotals
+  zone_visits: EmployeeZoneVisitStat[]
+  daily_summaries: EmployeeDaySummary[]
+  recent_timeline: EmployeeTimelineItem[]
+}
+
 export type ZonePoint = {
   x: number
   y: number

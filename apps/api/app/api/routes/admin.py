@@ -19,6 +19,7 @@ from app.schemas.monitoring import (
     DashboardOverview,
     EmployeeCreate,
     EmployeeFaceProfileRead,
+    EmployeeReportRead,
     EmployeeRead,
     LiveMonitorStatus,
     ModeTemplate,
@@ -29,6 +30,7 @@ from app.schemas.monitoring import (
     ZoneCreate,
     ZoneRead,
 )
+from app.services.employee_report_service import build_employee_report
 from app.services.employee_service import add_employee_face_profile, create_employee, list_employees
 from app.services.monitoring_service import (
     build_dashboard_overview,
@@ -102,6 +104,16 @@ def post_employee(
     _: object = Depends(require_admin),
 ) -> Employee:
     return create_employee(db, payload)
+
+
+@router.get("/employees/{employee_id}/report", response_model=EmployeeReportRead)
+def get_employee_report(
+    employee_id: str,
+    days: int = 7,
+    db: Session = Depends(get_db),
+    _: object = Depends(require_admin),
+) -> EmployeeReportRead:
+    return build_employee_report(db, employee_id, days)
 
 
 @router.post(
