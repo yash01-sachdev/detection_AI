@@ -36,11 +36,13 @@ storage/
 - site mode selection: home, office, restaurant
 - default rules per site mode
 - site, camera, and zone management
+- employee management and face enrollment
 - event ingest endpoint for the worker
 - alert history and dashboard overview
 - worker scaffold for webcam and DroidCam camera sources
 - live camera preview for debugging the worker feed
 - zone-aware event assignment with rule-based alerts
+- face recognition that upgrades a detected `person` into a known `employee`
 
 ## Local Startup
 
@@ -139,6 +141,30 @@ Before starting the worker for live ingest, create a site and camera in the dash
 
 - `SITE_ID`
 - `CAMERA_ID`
+
+### Employee Enrollment And Face Recognition
+
+1. Start the stack with `.\scripts\dev.ps1 start`.
+2. Open `http://127.0.0.1:5173` and log in as the admin.
+3. Go to `Employees`.
+4. Create the employee record first.
+5. Upload one or more clear front-facing images for that employee.
+6. Open `http://127.0.0.1:5173/live` and point the camera at that employee.
+
+What happens next:
+
+- the worker pulls enrolled employee images from the API
+- it downloads the OpenCV face models automatically on first use
+- it matches live faces against the enrolled profiles
+- when a match is strong enough, the detection changes from `person` to `employee`
+- that upgraded identity flows into the same rules and alerts pipeline
+
+Tips for better recognition:
+
+- use bright lighting
+- keep the face mostly front-facing during enrollment
+- upload more than one clear photo when possible
+- keep `FACE_MATCH_THRESHOLD` conservative if you want fewer false matches
 
 ## Default Admin
 

@@ -136,6 +136,7 @@ class MonitoringPipeline:
         camera_source: str,
         preview_output_dir: str,
         snapshot_output_dir: str,
+        face_recognizer: Any | None = None,
     ) -> None:
         self.source = source
         self.detector = detector
@@ -143,7 +144,7 @@ class MonitoringPipeline:
         self.frame_stride = max(frame_stride, 1)
         self.alert_cooldown_seconds = max(alert_cooldown_seconds, 1)
         self.tracker = StableTracker()
-        self.face_recognizer = NoopFaceRecognizer()
+        self.face_recognizer = face_recognizer or NoopFaceRecognizer()
         self.posture_analyzer = NoopPostureAnalyzer()
         self.last_sent_at: dict[str, dict[str, float | str]] = {}
         self.worker_name = worker_name
@@ -250,19 +251,25 @@ class MonitoringPipeline:
         key = detection.track_id
         now = monotonic()
         zone_id = detection.zone_id or ""
+        entity_key = _build_entity_key(detection)
         last_sent = self.last_sent_at.get(key)
         if last_sent is None:
-            self.last_sent_at[key] = {"at": now, "zone_id": zone_id}
+            self.last_sent_at[key] = {"at": now, "zone_id": zone_id, "entity_key": entity_key}
             return True
 
         last_zone_id = str(last_sent.get("zone_id", ""))
+        last_entity_key = str(last_sent.get("entity_key", ""))
+        if entity_key and entity_key != last_entity_key:
+            self.last_sent_at[key] = {"at": now, "zone_id": zone_id, "entity_key": entity_key}
+            return True
+
         if zone_id and zone_id != last_zone_id:
-            self.last_sent_at[key] = {"at": now, "zone_id": zone_id}
+            self.last_sent_at[key] = {"at": now, "zone_id": zone_id, "entity_key": entity_key}
             return True
 
         if not detection.details.get("track_is_new", False):
             return False
-        self.last_sent_at[key] = {"at": now, "zone_id": zone_id}
+        self.last_sent_at[key] = {"at": now, "zone_id": zone_id, "entity_key": entity_key}
         return True
 
     def _refresh_zones(self, force: bool = False) -> None:
@@ -429,6 +436,15 @@ def _bbox_center(bbox: BoundingBox) -> tuple[float, float]:
 
 def _center_distance(a: tuple[float, float], b: tuple[float, float]) -> float:
     return ((a[0] - b[0]) ** 2 + (a[1] - b[1]) ** 2) ** 0.5
+
+
+def _build_entity_key(detection: Detection) -> str:
+    employee_id = str(detection.details.get("employee_id", "")).strip()
+    if employee_id:
+        return f"employee:{employee_id}"
+    if detection.identity:
+        return f"identity:{detection.identity.lower()}"
+    return detection.entity_type
 
 
 def _point_in_polygon(point: tuple[float, float], zone: ZoneDefinition) -> bool:

@@ -140,6 +140,47 @@ class PipelineTests(unittest.TestCase):
             self.assertFalse(pipeline._should_publish(same_track))
             self.assertTrue(pipeline._should_publish(zone_entry))
 
+    def test_publish_logic_sends_identity_upgrade_for_existing_track(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            pipeline = MonitoringPipeline(
+                source=DummySource(),
+                detector=DummyDetector(),
+                api_client=DummyClient(),
+                frame_stride=1,
+                alert_cooldown_seconds=3,
+                worker_name="unit-test-worker",
+                camera_source_type="test",
+                camera_source="test",
+                preview_output_dir=temp_dir,
+                snapshot_output_dir=temp_dir,
+            )
+
+            first = Detection(
+                label="person",
+                entity_type="person",
+                confidence=0.9,
+                bbox=BoundingBox(x1=10, y1=10, x2=110, y2=210),
+                track_id="t1",
+                details={"track_is_new": True},
+            )
+            upgraded = Detection(
+                label="person",
+                entity_type="employee",
+                confidence=0.9,
+                bbox=BoundingBox(x1=12, y1=10, x2=112, y2=210),
+                track_id="t1",
+                identity="Smoke Tester",
+                details={
+                    "track_is_new": False,
+                    "employee_id": "employee-1",
+                    "employee_code": "EMP-001",
+                },
+            )
+
+            self.assertTrue(pipeline._should_publish(first))
+            self.assertTrue(pipeline._should_publish(upgraded))
+            self.assertFalse(pipeline._should_publish(upgraded))
+
 
 if __name__ == "__main__":
     unittest.main()

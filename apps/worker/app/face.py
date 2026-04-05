@@ -7,6 +7,7 @@ from urllib.parse import urljoin
 import httpx
 
 from app.client import ApiClient
+from app.config import Settings
 from app.types import BoundingBox, Detection, EmployeeDefinition
 
 logger = logging.getLogger(__name__)
@@ -79,11 +80,15 @@ class EmployeeFaceRecognizer:
         if self.detector is None or self.recognizer is None or not detections:
             return detections
 
-        self._refresh_known_faces()
-        if not self.known_faces:
-            return detections
+        try:
+            self._refresh_known_faces()
+            if not self.known_faces:
+                return detections
 
-        faces = self._recognize_faces(frame)
+            faces = self._recognize_faces(frame)
+        except Exception as exc:  # pragma: no cover
+            logger.warning("Face recognition skipped for this frame: %s", exc)
+            return detections
         if not faces:
             return detections
 
@@ -155,7 +160,7 @@ class EmployeeFaceRecognizer:
                 KnownFace(
                     employee_id=employee.id,
                     employee_code=employee.employee_code,
-                    full_name=f"{employee.first_name} {employee.last_name}".strip(),
+                    full_name=_employee_display_name(employee),
                     role_title=employee.role_title,
                     embedding=embedding,
                 )
@@ -230,9 +235,31 @@ class EmployeeFaceRecognizer:
             if target.exists() and target.stat().st_size > 1024:
                 continue
 
+            logger.info("Downloading face model %s.", file_name)
             response = httpx.get(url, timeout=60.0, follow_redirects=True)
             response.raise_for_status()
+            if _looks_like_git_lfs_pointer(response.content):
+                raise RuntimeError(f"Downloaded a Git LFS pointer instead of the {file_name} model.")
             target.write_bytes(response.content)
+
+
+def build_face_recognizer(settings: Settings, api_client: ApiClient) -> EmployeeFaceRecognizer | None:
+    if not settings.site_id:
+        logger.info("Face recognition is disabled because SITE_ID is not configured.")
+        return None
+
+    recognizer = EmployeeFaceRecognizer(
+        api_client=api_client,
+        api_base_url=settings.api_base_url,
+        model_dir=settings.face_model_dir,
+        refresh_seconds=settings.face_profile_refresh_seconds,
+        match_threshold=settings.face_match_threshold,
+    )
+    if recognizer.detector is None or recognizer.recognizer is None:
+        logger.warning("Face recognition is unavailable. Continuing without employee matching.")
+        return None
+
+    return recognizer
 
 
 @dataclass
@@ -279,3 +306,12 @@ def _find_face_match_for_detection(detection: Detection, faces: list[RecognizedF
 
 def _point_inside_bbox(point: tuple[float, float], bbox: BoundingBox) -> bool:
     return bbox.x1 <= point[0] <= bbox.x2 and bbox.y1 <= point[1] <= bbox.y2
+
+
+def _employee_display_name(employee: EmployeeDefinition) -> str:
+    full_name = f"{employee.first_name} {employee.last_name}".strip()
+    return full_name or employee.employee_code
+
+
+def _looks_like_git_lfs_pointer(content: bytes) -> bool:
+    return content.startswith(b"version https://git-lfs.github.com/spec")
