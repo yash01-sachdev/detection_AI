@@ -259,11 +259,7 @@ def _rule_matches(
 
     for key, expected in rule.conditions.items():
         actual = actual_values.get(key)
-        if isinstance(expected, list):
-            if actual not in expected:
-                return False
-            continue
-        if actual != expected:
+        if not _condition_matches(key, actual, expected):
             return False
 
     return True
@@ -333,3 +329,27 @@ def _normalize_value(value: object) -> object:
     if hasattr(value, "value"):
         return getattr(value, "value")
     return value
+
+
+def _condition_matches(key: str, actual: object, expected: object) -> bool:
+    if isinstance(expected, list):
+        return any(_condition_matches(key, actual, item) for item in expected)
+
+    if key == "entity_type":
+        return _entity_type_matches(actual, expected)
+
+    return _normalize_value(actual) == _normalize_value(expected)
+
+
+def _entity_type_matches(actual: object, expected: object) -> bool:
+    actual_value = _normalize_value(actual)
+    expected_value = _normalize_value(expected)
+
+    if actual_value == expected_value:
+        return True
+
+    # An employee is still a person for generic person-scoped rules.
+    if expected_value == "person" and actual_value == "employee":
+        return True
+
+    return False

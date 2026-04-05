@@ -22,6 +22,56 @@ class MonitoringServiceTests(unittest.TestCase):
         Base.metadata.drop_all(self.engine)
         self.engine.dispose()
 
+    def _create_site_camera_zone(
+        self,
+        *,
+        site_type: SiteType,
+        zone_type: ZoneType,
+        zone_name: str,
+        is_restricted: bool,
+    ) -> tuple[object, Camera, Zone]:
+        with self.SessionLocal() as db:
+            bootstrap_default_admin(db)
+            site = create_site_with_default_rules(
+                db,
+                SiteCreate(
+                    name=f"{site_type.value.title()} HQ",
+                    site_type=site_type,
+                    timezone="Asia/Calcutta",
+                    description="Monitoring service test site",
+                ),
+            )
+
+            camera = Camera(
+                site_id=site.id,
+                name="Front Camera",
+                source_type=CameraSourceType.webcam,
+                source_value="0",
+                is_enabled=True,
+            )
+            db.add(camera)
+            db.flush()
+
+            zone = Zone(
+                site_id=site.id,
+                name=zone_name,
+                zone_type=zone_type,
+                color="#ff8800",
+                is_restricted=is_restricted,
+                points=[
+                    {"x": 0.0, "y": 0.0},
+                    {"x": 640.0, "y": 0.0},
+                    {"x": 640.0, "y": 480.0},
+                    {"x": 0.0, "y": 480.0},
+                ],
+            )
+            db.add(zone)
+            db.commit()
+            db.refresh(camera)
+            db.refresh(zone)
+            db.refresh(site)
+            return site, camera, zone
+
     def test_create_site_seeds_default_rules(self) -> None:
         with self.SessionLocal() as db:
             site = create_site_with_default_rules(
@@ -41,44 +91,14 @@ class MonitoringServiceTests(unittest.TestCase):
         self.assertEqual({rule.template_key for rule in rules}, {"office_restricted_zone", "office_desk_inactivity"})
 
     def test_ingest_restricted_zone_creates_rule_based_alert(self) -> None:
+        site, camera, zone = self._create_site_camera_zone(
+            site_type=SiteType.office,
+            zone_type=ZoneType.restricted,
+            zone_name="Server Room",
+            is_restricted=True,
+        )
+
         with self.SessionLocal() as db:
-            bootstrap_default_admin(db)
-            site = create_site_with_default_rules(
-                db,
-                SiteCreate(
-                    name="Office HQ",
-                    site_type=SiteType.office,
-                    timezone="Asia/Calcutta",
-                    description="Main office",
-                ),
-            )
-
-            camera = Camera(
-                site_id=site.id,
-                name="Front Camera",
-                source_type=CameraSourceType.webcam,
-                source_value="0",
-                is_enabled=True,
-            )
-            db.add(camera)
-            db.flush()
-
-            zone = Zone(
-                site_id=site.id,
-                name="Server Room",
-                zone_type=ZoneType.restricted,
-                color="#ff8800",
-                is_restricted=True,
-                points=[
-                    {"x": 0.0, "y": 0.0},
-                    {"x": 640.0, "y": 0.0},
-                    {"x": 640.0, "y": 480.0},
-                    {"x": 0.0, "y": 480.0},
-                ],
-            )
-            db.add(zone)
-            db.commit()
-
             response = ingest_detection_event(
                 db,
                 DetectionIngestRequest(
@@ -103,6 +123,82 @@ class MonitoringServiceTests(unittest.TestCase):
         self.assertEqual(alert.details["zone_name"], "Server Room")
         self.assertEqual(alert.details["zone_type"], "restricted")
         self.assertEqual(alert.snapshot_path, "/media/snapshots/test.jpg")
+
+    def test_employee_matches_generic_person_restricted_zone_rule(self) -> None:
+        site, camera, zone = self._create_site_camera_zone(
+            site_type=SiteType.office,
+            zone_type=ZoneType.restricted,
+            zone_name="Finance Vault",
+            is_restricted=True,
+        )
+
+        with self.SessionLocal() as db:
+            response = ingest_detection_event(
+                db,
+                DetectionIngestRequest(
+                    site_id=site.id,
+                    camera_id=camera.id,
+                    zone_id=zone.id,
+                    entity_type=EntityType.employee,
+                    label="Smoke Tester",
+                    track_id="t42",
+                    confidence=0.95,
+                    occurred_at=datetime.now(UTC),
+                    details={"employee_id": "employee-1", "employee_code": "EMP-001", "source": "unit-test"},
+                ),
+            )
+            alert = db.get(Alert, response.alert_id)
+
+        self.assertIsNotNone(response.alert_id)
+        self.assertIsNotNone(alert)
+        self.assertEqual(alert.title, "Restricted Zone Entry")
+        self.assertEqual(alert.details["zone_name"], "Finance Vault")
+        self.assertEqual(alert.details["employee_code"], "EMP-001")
+
+    def test_restaurant_smoking_area_alert_requires_employee_match(self) -> None:
+        site, camera, zone = self._create_site_camera_zone(
+            site_type=SiteType.restaurant,
+            zone_type=ZoneType.smoking_area,
+            zone_name="Smoking Area",
+            is_restricted=True,
+        )
+
+        with self.SessionLocal() as db:
+            employee_response = ingest_detection_event(
+                db,
+                DetectionIngestRequest(
+                    site_id=site.id,
+                    camera_id=camera.id,
+                    zone_id=zone.id,
+                    entity_type=EntityType.employee,
+                    label="Live Verify",
+                    track_id="t7",
+                    confidence=0.92,
+                    occurred_at=datetime.now(UTC),
+                    details={"employee_id": "employee-7", "employee_code": "EMP-777", "source": "unit-test"},
+                ),
+            )
+            employee_alert = db.get(Alert, employee_response.alert_id)
+            employee_alert_title = employee_alert.title if employee_alert is not None else None
+
+            person_response = ingest_detection_event(
+                db,
+                DetectionIngestRequest(
+                    site_id=site.id,
+                    camera_id=camera.id,
+                    zone_id=zone.id,
+                    entity_type=EntityType.person,
+                    label="person",
+                    track_id="t8",
+                    confidence=0.88,
+                    occurred_at=datetime.now(UTC),
+                    details={"source": "unit-test"},
+                ),
+            )
+
+        self.assertIsNotNone(employee_response.alert_id)
+        self.assertEqual(employee_alert_title, "Employee In Smoking Area")
+        self.assertIsNone(person_response.alert_id)
 
 
 if __name__ == "__main__":
