@@ -418,6 +418,87 @@ a {
   border-top: 1px solid var(--border);
 }
 
+.zone-form-grid {
+  display: grid;
+  gap: 0.85rem;
+  grid-template-columns: minmax(0, 1fr) 120px;
+}
+
+.zone-editor {
+  display: grid;
+  gap: 0.75rem;
+}
+
+.zone-editor__toolbar,
+.zone-editor__meta,
+.zone-editor__actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.zone-editor__hint {
+  margin: 0;
+  color: var(--muted);
+}
+
+.zone-editor__actions {
+  justify-content: flex-end;
+}
+
+.zone-editor__stage {
+  position: relative;
+  min-height: 280px;
+  border-radius: 1rem;
+  border: 1px solid var(--border);
+  background:
+    linear-gradient(180deg, rgba(0, 0, 0, 0.16), rgba(0, 0, 0, 0.3)),
+    rgba(255, 255, 255, 0.04);
+  overflow: hidden;
+}
+
+.zone-editor__stage--interactive {
+  cursor: crosshair;
+}
+
+.zone-editor__image {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+
+.zone-editor__overlay {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+}
+
+.zone-editor__empty {
+  display: grid;
+  place-items: center;
+  min-height: 280px;
+  padding: 1.5rem;
+  text-align: center;
+  color: var(--muted);
+}
+
+.zone-editor__empty strong {
+  display: block;
+  color: var(--text);
+  margin-bottom: 0.35rem;
+}
+
+.zone-editor__empty p {
+  margin: 0;
+}
+
+.zone-editor__meta {
+  color: var(--muted);
+}
+
 .employee-face-strip {
   display: flex;
   gap: 0.5rem;
@@ -475,5 +556,15 @@ a {
 
   .app-shell__main {
     padding: 1.25rem;
+  }
+
+  .zone-form-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .zone-editor__toolbar,
+  .zone-editor__meta {
+    flex-direction: column;
+    align-items: flex-start;
   }
 }
