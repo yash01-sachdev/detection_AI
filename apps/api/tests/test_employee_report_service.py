@@ -280,6 +280,91 @@ class EmployeeReportServiceTests(unittest.TestCase):
         self.assertEqual(report.recent_timeline[0].inactive_seconds, 45)
         self.assertEqual(report.recent_timeline[0].posture, "inactive")
 
+    def test_build_employee_report_describes_pose_posture_events(self) -> None:
+        reference_time = datetime(2026, 4, 8, 12, 0, tzinfo=UTC)
+        posture_time = datetime(2026, 4, 7, 5, 0, tzinfo=UTC)
+
+        with self.SessionLocal() as db:
+            site = create_site_with_default_rules(
+                db,
+                SiteCreate(
+                    name="Pose Office",
+                    site_type=SiteType.office,
+                    timezone="Asia/Calcutta",
+                    description="Pose reporting test site",
+                ),
+            )
+
+            camera = Camera(
+                site_id=site.id,
+                name="Desk Camera",
+                source_type=CameraSourceType.webcam,
+                source_value="0",
+                is_enabled=True,
+            )
+            db.add(camera)
+            db.flush()
+
+            desk_zone = Zone(
+                site_id=site.id,
+                name="Support Desk",
+                zone_type=ZoneType.desk,
+                color="#148A72",
+                is_restricted=False,
+                points=[
+                    {"x": 0.0, "y": 0.0},
+                    {"x": 640.0, "y": 0.0},
+                    {"x": 640.0, "y": 480.0},
+                    {"x": 0.0, "y": 480.0},
+                ],
+            )
+            db.add(desk_zone)
+            db.flush()
+
+            employee = Employee(
+                site_id=site.id,
+                employee_code="EMP-333",
+                first_name="Pose",
+                last_name="Tester",
+                role_title="Analyst",
+                is_active=True,
+            )
+            db.add(employee)
+            db.commit()
+            db.refresh(camera)
+            db.refresh(desk_zone)
+            db.refresh(employee)
+
+            ingest_detection_event(
+                db,
+                DetectionIngestRequest(
+                    site_id=site.id,
+                    camera_id=camera.id,
+                    zone_id=desk_zone.id,
+                    entity_type=EntityType.employee,
+                    label="Pose Tester",
+                    track_id="t-head-1",
+                    confidence=0.92,
+                    occurred_at=posture_time,
+                    details={
+                        "employee_id": employee.id,
+                        "employee_code": employee.employee_code,
+                        "posture": "head_down",
+                        "source": "unit-test",
+                    },
+                ),
+            )
+
+            report = build_employee_report_at(
+                db,
+                employee.id,
+                days=7,
+                reference_time=reference_time,
+            )
+
+        self.assertTrue(any(item.posture == "head_down" for item in report.recent_timeline))
+        self.assertTrue(any("Head-down posture detected" in item.description for item in report.recent_timeline))
+
     def test_build_employee_report_marks_late_and_off_day_activity(self) -> None:
         reference_time = datetime(2026, 4, 6, 18, 0, tzinfo=UTC)
         scheduled_day = datetime(2026, 4, 6, 4, 10, tzinfo=UTC)

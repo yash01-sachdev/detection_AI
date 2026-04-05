@@ -21,6 +21,11 @@ class Settings(BaseSettings):
     face_model_dir: str = "../../models/opencv"
     face_profile_refresh_seconds: int = 60
     face_match_threshold: float = 0.45
+    enable_pose_posture: bool = True
+    pose_model: str = "yolov8n-pose.pt"
+    pose_confidence_threshold: float = 0.5
+    head_down_threshold_seconds: int = 8
+    fall_threshold_seconds: int = 3
     inactivity_threshold_seconds: int = 20
     inactivity_movement_threshold_px: float = 24.0
 

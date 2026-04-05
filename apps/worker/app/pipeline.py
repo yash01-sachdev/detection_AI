@@ -3,7 +3,7 @@ import json
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
-from time import sleep
+from time import monotonic, sleep
 from typing import Any
 
 from app.camera import BaseCameraSource
@@ -345,11 +345,7 @@ class MonitoringPipeline:
 
         for detection in detections:
             zone_name = str(detection.details.get("zone_name", "")).strip()
-            posture = detection.posture or ""
-            posture_suffix = ""
-            if posture == "inactive":
-                inactive_seconds = int(detection.details.get("inactive_seconds") or 0)
-                posture_suffix = f" ({inactive_seconds}s inactive)" if inactive_seconds else " (inactive)"
+            posture_suffix = _posture_suffix(detection)
             labels.append(
                 f"{detection.identity or detection.label}{posture_suffix} @ {zone_name}"
                 if zone_name
@@ -363,9 +359,9 @@ class MonitoringPipeline:
             caption = f"{(detection.identity or detection.label).title()} {int(detection.confidence * 100)}%"
             if zone_name:
                 caption = f"{caption} | {zone_name}"
-            if posture == "inactive":
-                inactive_seconds = int(detection.details.get("inactive_seconds") or 0)
-                caption = f"{caption} | inactive {inactive_seconds}s" if inactive_seconds else f"{caption} | inactive"
+            posture_label = _posture_label(detection)
+            if posture_label:
+                caption = f"{caption} | {posture_label}"
             cv2.putText(
                 preview_frame,
                 caption,
@@ -434,9 +430,9 @@ class MonitoringPipeline:
         caption = f"{(detection.identity or detection.label).title()} {int(detection.confidence * 100)}%"
         if zone_name:
             caption = f"{caption} | {zone_name}"
-        if detection.posture == "inactive":
-            inactive_seconds = int(detection.details.get("inactive_seconds") or 0)
-            caption = f"{caption} | inactive {inactive_seconds}s" if inactive_seconds else f"{caption} | inactive"
+        posture_label = _posture_label(detection)
+        if posture_label:
+            caption = f"{caption} | {posture_label}"
 
         cv2.putText(
             snapshot,
@@ -500,3 +496,19 @@ def _polygon_area(zone: ZoneDefinition) -> float:
         area += point.x * next_point.y
         area -= next_point.x * point.y
     return abs(area) / 2
+
+
+def _posture_suffix(detection: Detection) -> str:
+    posture_label = _posture_label(detection)
+    return f" ({posture_label})" if posture_label else ""
+
+
+def _posture_label(detection: Detection) -> str:
+    if detection.posture == "inactive":
+        inactive_seconds = int(detection.details.get("inactive_seconds") or 0)
+        return f"{inactive_seconds}s inactive" if inactive_seconds else "inactive"
+    if detection.posture == "head_down":
+        return "head down"
+    if detection.posture == "fallen":
+        return "fall detected"
+    return ""

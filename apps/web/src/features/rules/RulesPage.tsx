@@ -10,6 +10,7 @@ const initialRuleForm = {
   site_id: '',
   zone_id: '',
   entity_type: 'employee',
+  posture: '',
   severity: 'high',
   name: '',
   description: '',
@@ -23,20 +24,25 @@ function slugify(value: string) {
     .replace(/^_+|_+$/g, '')
 }
 
-function createTemplateKey(name: string, zoneId: string, entityType: string) {
-  const base = slugify(name) || `${entityType}_zone_rule`
+function createTemplateKey(name: string, zoneId: string, entityType: string, posture: string) {
+  const postureSuffix = posture ? `_${posture}` : ''
+  const base = slugify(name) || `${entityType}${postureSuffix}_zone_rule`
   return `${base}_${zoneId.slice(0, 8)}`
 }
 
 function describeRule(rule: Rule, zonesById: Record<string, Zone>) {
   const entityType = String(rule.conditions.entity_type ?? 'anything')
+  const posture = typeof rule.conditions.posture === 'string' ? rule.conditions.posture : ''
   const zoneId = typeof rule.conditions.zone_id === 'string' ? rule.conditions.zone_id : ''
   const zoneType = typeof rule.conditions.zone_type === 'string' ? rule.conditions.zone_type : ''
   const zoneLabel = zoneId
     ? zonesById[zoneId]?.name || 'selected zone'
     : (zoneType || 'any zone').replace(/_/g, ' ')
+  const subjectLabel = posture
+    ? `${entityType.replace(/_/g, ' ')} shows ${posture.replace(/_/g, ' ')} posture`
+    : `${entityType.replace(/_/g, ' ')} enters`
 
-  return `If ${entityType.replace(/_/g, ' ')} enters ${zoneLabel}, create ${rule.severity} alert`
+  return `If ${subjectLabel} in ${zoneLabel}, create ${rule.severity} alert`
 }
 
 export function RulesPage() {
@@ -94,7 +100,9 @@ export function RulesPage() {
 
   const selectedZone = form.zone_id ? zonesById[form.zone_id] : null
   const previewSummary = selectedZone
-    ? `If ${form.entity_type} enters ${selectedZone.name}, create ${form.severity} alert.`
+    ? form.posture
+      ? `If ${form.entity_type} shows ${form.posture.replace(/_/g, ' ')} in ${selectedZone.name}, create ${form.severity} alert.`
+      : `If ${form.entity_type} enters ${selectedZone.name}, create ${form.severity} alert.`
     : 'Pick a site and zone to preview the rule.'
 
   function handleFormSiteChange(siteId: string) {
@@ -138,12 +146,17 @@ export function RulesPage() {
     const payload = {
       site_id: form.site_id,
       applies_to_site_type: null,
-      template_key: createTemplateKey(trimmedName, zone.id, form.entity_type),
+      template_key: createTemplateKey(trimmedName, zone.id, form.entity_type, form.posture),
       name: trimmedName,
-      description: form.description.trim() || `Alert when ${form.entity_type} enters ${zone.name}.`,
+      description:
+        form.description.trim() ||
+        (form.posture
+          ? `Alert when ${form.entity_type} shows ${form.posture.replace(/_/g, ' ')} in ${zone.name}.`
+          : `Alert when ${form.entity_type} enters ${zone.name}.`),
       conditions: {
         entity_type: form.entity_type,
         zone_id: zone.id,
+        ...(form.posture ? { posture: form.posture } : {}),
       },
       actions: {
         create_alert: true,
@@ -222,6 +235,21 @@ export function RulesPage() {
                 <option value="employee">Recognized employee</option>
                 <option value="dog">Dog</option>
                 <option value="vehicle">Vehicle</option>
+              </select>
+            </label>
+
+            <label className="field">
+              <span>Optional posture</span>
+              <select
+                value={form.posture}
+                onChange={(event) =>
+                  setForm((current) => ({ ...current, posture: event.target.value }))
+                }
+              >
+                <option value="">Any zone entry</option>
+                <option value="inactive">Inactive</option>
+                <option value="head_down">Head-down posture</option>
+                <option value="fallen">Fall-like posture</option>
               </select>
             </label>
 

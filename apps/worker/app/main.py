@@ -6,6 +6,7 @@ from app.config import get_settings
 from app.detection import build_detector
 from app.face import build_face_recognizer
 from app.pipeline import MonitoringPipeline
+from app.pose import build_pose_estimator
 from app.posture import build_posture_analyzer
 
 
@@ -27,6 +28,9 @@ def main() -> None:
         snapshot_output_dir=settings.snapshot_output_dir,
         face_recognizer=build_face_recognizer(settings, api_client),
         posture_analyzer=build_posture_analyzer(
+            pose_estimator=build_pose_estimator(settings),
+            head_down_threshold_seconds=settings.head_down_threshold_seconds,
+            fall_threshold_seconds=settings.fall_threshold_seconds,
             inactivity_threshold_seconds=settings.inactivity_threshold_seconds,
             movement_threshold_px=settings.inactivity_movement_threshold_px,
         ),

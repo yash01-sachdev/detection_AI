@@ -87,8 +87,16 @@ class MonitoringServiceTests(unittest.TestCase):
             rules = list(db.scalars(select(Rule).where(Rule.site_id == site.id)))
 
         self.assertEqual(site.site_type, SiteType.office)
-        self.assertEqual(len(rules), 2)
-        self.assertEqual({rule.template_key for rule in rules}, {"office_restricted_zone", "office_desk_inactivity"})
+        self.assertEqual(len(rules), 4)
+        self.assertEqual(
+            {rule.template_key for rule in rules},
+            {
+                "office_restricted_zone",
+                "office_desk_inactivity",
+                "office_head_down_watch",
+                "office_fall_detection",
+            },
+        )
 
     def test_ingest_restricted_zone_creates_rule_based_alert(self) -> None:
         site, camera, zone = self._create_site_camera_zone(
@@ -237,6 +245,68 @@ class MonitoringServiceTests(unittest.TestCase):
         self.assertEqual(event.details["inactive_seconds"], 28)
         self.assertIsNone(response.alert_id)
         self.assertEqual(len(alerts), 0)
+
+    def test_office_head_down_desk_creates_alert(self) -> None:
+        site, camera, zone = self._create_site_camera_zone(
+            site_type=SiteType.office,
+            zone_type=ZoneType.desk,
+            zone_name="Desk Row B",
+            is_restricted=False,
+        )
+
+        with self.SessionLocal() as db:
+            response = ingest_detection_event(
+                db,
+                DetectionIngestRequest(
+                    site_id=site.id,
+                    camera_id=camera.id,
+                    zone_id=zone.id,
+                    entity_type=EntityType.employee,
+                    label="Live Verify",
+                    track_id="t-head-down-1",
+                    confidence=0.9,
+                    occurred_at=datetime.now(UTC),
+                    details={
+                        "employee_id": "employee-12",
+                        "employee_code": "EMP-012",
+                        "posture": "head_down",
+                        "source": "unit-test",
+                    },
+                ),
+            )
+            alert = db.get(Alert, response.alert_id)
+
+        self.assertIsNotNone(alert)
+        self.assertEqual(alert.title, "Head-Down Desk Alert")
+        self.assertEqual(alert.details["posture"], "head_down")
+
+    def test_office_fall_detection_creates_alert_without_zone(self) -> None:
+        site, camera, _ = self._create_site_camera_zone(
+            site_type=SiteType.office,
+            zone_type=ZoneType.general,
+            zone_name="Open Floor",
+            is_restricted=False,
+        )
+
+        with self.SessionLocal() as db:
+            response = ingest_detection_event(
+                db,
+                DetectionIngestRequest(
+                    site_id=site.id,
+                    camera_id=camera.id,
+                    entity_type=EntityType.person,
+                    label="person",
+                    track_id="t-fall-1",
+                    confidence=0.93,
+                    occurred_at=datetime.now(UTC),
+                    details={"posture": "fallen", "source": "unit-test"},
+                ),
+            )
+            alert = db.get(Alert, response.alert_id)
+
+        self.assertIsNotNone(alert)
+        self.assertEqual(alert.title, "Fall Detection")
+        self.assertEqual(alert.details["posture"], "fallen")
 
     def test_custom_zone_rule_overrides_generic_default_rule(self) -> None:
         site, camera, zone = self._create_site_camera_zone(

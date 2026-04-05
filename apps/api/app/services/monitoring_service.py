@@ -65,6 +65,22 @@ MODE_RULES: dict[SiteType, dict[str, object]] = {
                 "conditions": {"entity_type": "person", "zone_type": "desk", "posture": "inactive"},
                 "actions": {"create_alert": False, "record_metric": True},
             },
+            {
+                "template_key": "office_head_down_watch",
+                "name": "Head-Down Desk Alert",
+                "description": "Alert when a person stays in a head-down posture at a desk.",
+                "severity": RuleSeverity.medium,
+                "conditions": {"entity_type": "person", "zone_type": "desk", "posture": "head_down"},
+                "actions": {"create_alert": True, "snapshot": True},
+            },
+            {
+                "template_key": "office_fall_detection",
+                "name": "Fall Detection",
+                "description": "Alert when a person shows a fall-like posture anywhere in the office.",
+                "severity": RuleSeverity.critical,
+                "conditions": {"entity_type": "person", "posture": "fallen"},
+                "actions": {"create_alert": True, "snapshot": True},
+            },
         ],
     },
     SiteType.restaurant: {

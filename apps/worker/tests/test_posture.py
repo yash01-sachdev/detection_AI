@@ -1,6 +1,7 @@
 import unittest
 
-from app.posture import InactivityPostureAnalyzer
+from app.pose import PoseDetection, PoseKeypoint
+from app.posture import PostureAnalyzer
 from app.types import BoundingBox, Detection
 
 
@@ -15,10 +16,21 @@ class FakeClock:
         self.value = value
 
 
-class InactivityPostureAnalyzerTests(unittest.TestCase):
+class FakePoseEstimator:
+    def __init__(self) -> None:
+        self.pose_detections: list[PoseDetection] = []
+
+    def estimate(self, frame) -> list[PoseDetection]:
+        return self.pose_detections
+
+
+class PostureAnalyzerTests(unittest.TestCase):
     def test_marks_person_in_desk_zone_inactive_after_threshold(self) -> None:
         clock = FakeClock()
-        analyzer = InactivityPostureAnalyzer(
+        analyzer = PostureAnalyzer(
+            pose_estimator=FakePoseEstimator(),
+            head_down_threshold_seconds=5,
+            fall_threshold_seconds=2,
             inactivity_threshold_seconds=10,
             movement_threshold_px=18,
             clock=clock.now,
@@ -49,7 +61,10 @@ class InactivityPostureAnalyzerTests(unittest.TestCase):
 
     def test_movement_resets_inactivity_state(self) -> None:
         clock = FakeClock()
-        analyzer = InactivityPostureAnalyzer(
+        analyzer = PostureAnalyzer(
+            pose_estimator=FakePoseEstimator(),
+            head_down_threshold_seconds=5,
+            fall_threshold_seconds=2,
             inactivity_threshold_seconds=10,
             movement_threshold_px=18,
             clock=clock.now,
@@ -78,6 +93,106 @@ class InactivityPostureAnalyzerTests(unittest.TestCase):
         self.assertEqual(inactive.posture, "inactive")
         self.assertIsNone(active_again.posture)
         self.assertNotIn("inactive_seconds", active_again.details)
+
+    def test_marks_head_down_after_pose_is_stable_in_desk_zone(self) -> None:
+        clock = FakeClock()
+        pose_estimator = FakePoseEstimator()
+        analyzer = PostureAnalyzer(
+            pose_estimator=pose_estimator,
+            head_down_threshold_seconds=5,
+            fall_threshold_seconds=2,
+            inactivity_threshold_seconds=15,
+            movement_threshold_px=18,
+            clock=clock.now,
+        )
+
+        detection = Detection(
+            label="person",
+            entity_type="employee",
+            confidence=0.97,
+            bbox=BoundingBox(x1=100, y1=50, x2=220, y2=290),
+            track_id="t3",
+            details={"zone_type": "desk", "zone_name": "Desk C"},
+        )
+        pose_estimator.pose_detections = [
+            _build_pose_detection(
+                bbox=BoundingBox(x1=102, y1=52, x2=218, y2=288),
+                keypoints={
+                    "nose": (160, 150),
+                    "left_shoulder": (145, 145),
+                    "right_shoulder": (177, 145),
+                    "left_hip": (150, 220),
+                    "right_hip": (180, 220),
+                },
+            )
+        ]
+
+        clock.set(0)
+        candidate = analyzer.annotate(None, [detection])[0]
+        clock.set(6)
+        active = analyzer.annotate(None, [detection])[0]
+
+        self.assertIsNone(candidate.posture)
+        self.assertEqual(active.posture, "head_down")
+        self.assertEqual(active.details["posture_source"], "pose_model")
+
+    def test_marks_fall_after_pose_is_stable(self) -> None:
+        clock = FakeClock()
+        pose_estimator = FakePoseEstimator()
+        analyzer = PostureAnalyzer(
+            pose_estimator=pose_estimator,
+            head_down_threshold_seconds=5,
+            fall_threshold_seconds=2,
+            inactivity_threshold_seconds=15,
+            movement_threshold_px=18,
+            clock=clock.now,
+        )
+
+        detection = Detection(
+            label="person",
+            entity_type="person",
+            confidence=0.95,
+            bbox=BoundingBox(x1=60, y1=200, x2=280, y2=320),
+            track_id="t4",
+            details={"zone_type": "general", "zone_name": "Open Floor"},
+        )
+        pose_estimator.pose_detections = [
+            _build_pose_detection(
+                bbox=BoundingBox(x1=62, y1=202, x2=278, y2=318),
+                keypoints={
+                    "left_shoulder": (120, 250),
+                    "right_shoulder": (150, 255),
+                    "left_hip": (200, 260),
+                    "right_hip": (230, 265),
+                    "left_ankle": (250, 270),
+                    "right_ankle": (275, 272),
+                },
+            )
+        ]
+
+        clock.set(0)
+        candidate = analyzer.annotate(None, [detection])[0]
+        clock.set(3)
+        active = analyzer.annotate(None, [detection])[0]
+
+        self.assertIsNone(candidate.posture)
+        self.assertEqual(active.posture, "fallen")
+        self.assertEqual(active.details["posture_source"], "pose_model")
+
+
+def _build_pose_detection(
+    *,
+    bbox: BoundingBox,
+    keypoints: dict[str, tuple[float, float]],
+) -> PoseDetection:
+    return PoseDetection(
+        bbox=bbox,
+        confidence=0.92,
+        keypoints={
+            name: PoseKeypoint(name=name, x=x, y=y, confidence=0.95)
+            for name, (x, y) in keypoints.items()
+        },
+    )
 
 
 if __name__ == "__main__":
