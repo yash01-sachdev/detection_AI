@@ -38,6 +38,11 @@ export type Employee = {
   last_name: string
   role_title: string
   is_active: boolean
+  shift_name: string
+  shift_start_time: string
+  shift_end_time: string
+  shift_grace_minutes: number
+  shift_days: string[]
   face_profiles: EmployeeFaceProfile[]
 }
 
@@ -49,6 +54,12 @@ export type EmployeeReportSubject = {
   site_id: string | null
   site_name: string | null
   timezone: string
+  shift_name: string
+  shift_start_time: string
+  shift_end_time: string
+  shift_grace_minutes: number
+  shift_days: string[]
+  shift_crosses_midnight: boolean
 }
 
 export type EmployeeZoneVisitStat = {
@@ -65,6 +76,16 @@ export type EmployeeReportTotals = {
   days_observed: number
   inactivity_event_count: number
   longest_inactivity_seconds: number
+}
+
+export type EmployeeAttendanceTotals = {
+  scheduled_days: number
+  attended_days: number
+  on_time_days: number
+  late_days: number
+  missed_days: number
+  off_day_activity_days: number
+  outside_shift_sighting_count: number
 }
 
 export type EmployeeDaySummary = {
@@ -92,6 +113,16 @@ export type EmployeeTimelineItem = {
   inactive_seconds: number | null
 }
 
+export type EmployeeAttendanceDay = {
+  date: string
+  is_scheduled: boolean
+  status: string
+  first_seen_at: string | null
+  last_seen_at: string | null
+  arrival_delta_minutes: number | null
+  outside_shift_sighting_count: number
+}
+
 export type EmployeeReport = {
   employee: EmployeeReportSubject
   generated_at: string
@@ -99,8 +130,10 @@ export type EmployeeReport = {
   window_end: string
   days: number
   totals: EmployeeReportTotals
+  attendance_totals: EmployeeAttendanceTotals
   zone_visits: EmployeeZoneVisitStat[]
   daily_summaries: EmployeeDaySummary[]
+  attendance_days: EmployeeAttendanceDay[]
   recent_timeline: EmployeeTimelineItem[]
 }
 

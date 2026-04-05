@@ -24,7 +24,7 @@ class EmployeeReportServiceTests(unittest.TestCase):
         self.engine.dispose()
 
     def test_build_employee_report_aggregates_presence_zones_and_timeline(self) -> None:
-        reference_time = datetime.now(UTC).replace(second=0, microsecond=0)
+        reference_time = datetime(2026, 4, 8, 12, 0, tzinfo=UTC)
         day_one_start = reference_time - timedelta(days=2, hours=2)
         day_one_restricted = day_one_start + timedelta(minutes=10)
         day_one_repeat = day_one_restricted + timedelta(seconds=10)
@@ -169,6 +169,11 @@ class EmployeeReportServiceTests(unittest.TestCase):
         self.assertEqual(report.totals.zone_visit_count, 3)
         self.assertEqual(report.totals.days_observed, 2)
         self.assertEqual(report.totals.presence_minutes, 11)
+        self.assertEqual(report.attendance_totals.scheduled_days, 6)
+        self.assertEqual(report.attendance_totals.attended_days, 2)
+        self.assertEqual(report.attendance_totals.on_time_days, 0)
+        self.assertEqual(report.attendance_totals.late_days, 2)
+        self.assertEqual(report.attendance_totals.missed_days, 4)
         self.assertEqual(len(report.daily_summaries), 2)
         day_dates = [day.date for day in report.daily_summaries]
         self.assertEqual(day_dates, sorted(day_dates, reverse=True))
@@ -176,6 +181,7 @@ class EmployeeReportServiceTests(unittest.TestCase):
         restricted_day = next(day for day in report.daily_summaries if day.violation_count == 1)
         self.assertEqual(restricted_day.alert_count, 1)
         self.assertEqual(restricted_day.violation_count, 1)
+        self.assertEqual(sum(1 for day in report.attendance_days if day.status == "late"), 2)
         self.assertEqual(report.zone_visits[0].zone_name, "Work Bay")
         self.assertEqual(report.zone_visits[0].visit_count, 2)
         self.assertEqual(report.zone_visits[1].zone_name, "Server Room")
@@ -185,7 +191,7 @@ class EmployeeReportServiceTests(unittest.TestCase):
         self.assertTrue(any(item.item_type == "alert" for item in report.recent_timeline))
 
     def test_build_employee_report_surfaces_inactivity_metrics(self) -> None:
-        reference_time = datetime.now(UTC).replace(second=0, microsecond=0)
+        reference_time = datetime(2026, 4, 8, 12, 0, tzinfo=UTC)
         inactive_time = reference_time - timedelta(hours=1)
 
         with self.SessionLocal() as db:
@@ -273,6 +279,112 @@ class EmployeeReportServiceTests(unittest.TestCase):
         self.assertEqual(report.recent_timeline[0].title, "EMP-888 marked inactive")
         self.assertEqual(report.recent_timeline[0].inactive_seconds, 45)
         self.assertEqual(report.recent_timeline[0].posture, "inactive")
+
+    def test_build_employee_report_marks_late_and_off_day_activity(self) -> None:
+        reference_time = datetime(2026, 4, 6, 18, 0, tzinfo=UTC)
+        scheduled_day = datetime(2026, 4, 6, 4, 10, tzinfo=UTC)
+        off_day = datetime(2026, 4, 5, 6, 0, tzinfo=UTC)
+
+        with self.SessionLocal() as db:
+            site = create_site_with_default_rules(
+                db,
+                SiteCreate(
+                    name="Attendance Office",
+                    site_type=SiteType.office,
+                    timezone="Asia/Calcutta",
+                    description="Shift attendance test site",
+                ),
+            )
+
+            camera = Camera(
+                site_id=site.id,
+                name="Attendance Camera",
+                source_type=CameraSourceType.webcam,
+                source_value="0",
+                is_enabled=True,
+            )
+            db.add(camera)
+            db.flush()
+
+            work_zone = Zone(
+                site_id=site.id,
+                name="Ops Floor",
+                zone_type=ZoneType.work_area,
+                color="#148A72",
+                is_restricted=False,
+                points=[
+                    {"x": 0.0, "y": 0.0},
+                    {"x": 640.0, "y": 0.0},
+                    {"x": 640.0, "y": 480.0},
+                    {"x": 0.0, "y": 480.0},
+                ],
+            )
+            db.add(work_zone)
+            db.flush()
+
+            employee = Employee(
+                site_id=site.id,
+                employee_code="EMP-990",
+                first_name="Shift",
+                last_name="Tester",
+                role_title="Coordinator",
+                is_active=True,
+                shift_name="Morning Shift",
+                shift_start_time="09:00",
+                shift_end_time="17:00",
+                shift_grace_minutes=10,
+            )
+            employee.shift_days = ["mon", "tue", "wed", "thu", "fri"]
+            db.add(employee)
+            db.commit()
+            db.refresh(camera)
+            db.refresh(work_zone)
+            db.refresh(employee)
+
+            ingest_detection_event(
+                db,
+                DetectionIngestRequest(
+                    site_id=site.id,
+                    camera_id=camera.id,
+                    zone_id=work_zone.id,
+                    entity_type=EntityType.employee,
+                    label="Shift Tester",
+                    track_id="t-late-1",
+                    confidence=0.92,
+                    occurred_at=scheduled_day,
+                    details={"employee_id": employee.id, "employee_code": employee.employee_code, "source": "unit-test"},
+                ),
+            )
+            ingest_detection_event(
+                db,
+                DetectionIngestRequest(
+                    site_id=site.id,
+                    camera_id=camera.id,
+                    zone_id=work_zone.id,
+                    entity_type=EntityType.employee,
+                    label="Shift Tester",
+                    track_id="t-offday-1",
+                    confidence=0.9,
+                    occurred_at=off_day,
+                    details={"employee_id": employee.id, "employee_code": employee.employee_code, "source": "unit-test"},
+                ),
+            )
+
+            report = build_employee_report_at(
+                db,
+                employee.id,
+                days=7,
+                reference_time=reference_time,
+            )
+
+        late_day = next(day for day in report.attendance_days if day.status == "late")
+        off_day_activity = next(day for day in report.attendance_days if day.status == "off_day_activity")
+
+        self.assertEqual(report.attendance_totals.late_days, 1)
+        self.assertEqual(report.attendance_totals.off_day_activity_days, 1)
+        self.assertEqual(report.attendance_totals.outside_shift_sighting_count, 1)
+        self.assertEqual(late_day.arrival_delta_minutes, 40)
+        self.assertFalse(off_day_activity.is_scheduled)
 
 
 if __name__ == "__main__":

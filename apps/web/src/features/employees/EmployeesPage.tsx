@@ -6,6 +6,7 @@ import { Panel } from '../../components/shared/Panel'
 import { API_BASE_URL, apiRequest } from '../../lib/api/client'
 import type {
   Employee,
+  EmployeeAttendanceDay,
   EmployeeDaySummary,
   EmployeeFaceProfile,
   EmployeeReport,
@@ -15,6 +16,15 @@ import type {
 } from '../../types/models'
 
 const API_ROOT = API_BASE_URL.replace(/\/api\/v1\/?$/, '')
+const weekdayOptions = [
+  { key: 'mon', label: 'Mon' },
+  { key: 'tue', label: 'Tue' },
+  { key: 'wed', label: 'Wed' },
+  { key: 'thu', label: 'Thu' },
+  { key: 'fri', label: 'Fri' },
+  { key: 'sat', label: 'Sat' },
+  { key: 'sun', label: 'Sun' },
+]
 
 const initialEmployeeForm = {
   site_id: '',
@@ -22,6 +32,11 @@ const initialEmployeeForm = {
   first_name: '',
   last_name: '',
   role_title: '',
+  shift_name: 'Day Shift',
+  shift_start_time: '09:00',
+  shift_end_time: '17:00',
+  shift_grace_minutes: 10,
+  shift_days: ['mon', 'tue', 'wed', 'thu', 'fri'],
   is_active: true,
 }
 
@@ -72,6 +87,59 @@ function renderTimelineMeta(item: EmployeeTimelineItem) {
   return parts.length ? parts.join(' | ') : 'Recorded by the monitoring system'
 }
 
+function formatShiftDays(days: string[]) {
+  if (!days.length) {
+    return 'No working days set'
+  }
+
+  return days
+    .map((day) => weekdayOptions.find((option) => option.key === day)?.label ?? day)
+    .join(', ')
+}
+
+function formatShiftWindow(shiftStartTime: string, shiftEndTime: string, shiftDays: string[]) {
+  return `${shiftStartTime} - ${shiftEndTime} | ${formatShiftDays(shiftDays)}`
+}
+
+function renderAttendanceStatus(day: EmployeeAttendanceDay) {
+  if (day.status === 'on_time') {
+    return 'On time'
+  }
+  if (day.status === 'late') {
+    return 'Late'
+  }
+  if (day.status === 'missed') {
+    return 'Missed'
+  }
+  if (day.status === 'off_day_activity') {
+    return 'Activity on off day'
+  }
+  return day.status.replace(/_/g, ' ')
+}
+
+function attendancePillClass(status: string) {
+  if (status === 'missed') {
+    return 'pill pill--critical'
+  }
+  if (status === 'late') {
+    return 'pill pill--medium'
+  }
+  return 'pill pill--low'
+}
+
+function renderArrivalDelta(minutes: number | null) {
+  if (minutes === null) {
+    return 'No arrival recorded'
+  }
+  if (minutes === 0) {
+    return 'Arrived exactly at shift start'
+  }
+  if (minutes < 0) {
+    return `${Math.abs(minutes)} min early`
+  }
+  return `${minutes} min late`
+}
+
 function renderDaySummary(day: EmployeeDaySummary) {
   return (
     <article key={day.date} className="list-row list-row--top">
@@ -88,6 +156,26 @@ function renderDaySummary(day: EmployeeDaySummary) {
       </div>
       <div className="stack-sm align-end">
         <span className="pill pill--medium">{day.violation_count} violations</span>
+      </div>
+    </article>
+  )
+}
+
+function renderAttendanceDay(day: EmployeeAttendanceDay) {
+  return (
+    <article key={`${day.date}-${day.status}`} className="list-row list-row--top">
+      <div>
+        <strong>{day.date}</strong>
+        <p>{renderAttendanceStatus(day)}</p>
+        <small>
+          First seen: {formatDateTime(day.first_seen_at)} | Last seen: {formatDateTime(day.last_seen_at)}
+        </small>
+        <small>
+          Arrival: {renderArrivalDelta(day.arrival_delta_minutes)} | Outside-shift sightings: {day.outside_shift_sighting_count}
+        </small>
+      </div>
+      <div className="stack-sm align-end">
+        <span className={attendancePillClass(day.status)}>{renderAttendanceStatus(day)}</span>
       </div>
     </article>
   )
@@ -167,6 +255,21 @@ export function EmployeesPage() {
     setReport(null)
   }
 
+  function toggleShiftDay(dayKey: string) {
+    setEmployeeForm((current) => {
+      const nextDays = current.shift_days.includes(dayKey)
+        ? current.shift_days.filter((day) => day !== dayKey)
+        : [...current.shift_days, dayKey]
+
+      return {
+        ...current,
+        shift_days: weekdayOptions
+          .map((option) => option.key)
+          .filter((day) => nextDays.includes(day)),
+      }
+    })
+  }
+
   async function handleEmployeeSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
     setError('')
@@ -222,7 +325,7 @@ export function EmployeesPage() {
       <div className="page-grid page-grid--two-up">
         <Panel
           title="Create Employee"
-          subtitle="Add the employee record first, then upload one or more clear face photos."
+          subtitle="Add the employee record, define the shift schedule, then upload one or more clear face photos."
         >
           <form className="stack" onSubmit={handleEmployeeSubmit}>
             <label className="field">
@@ -276,6 +379,67 @@ export function EmployeesPage() {
                 }
               />
             </label>
+            <label className="field">
+              <span>Shift name</span>
+              <input
+                value={employeeForm.shift_name}
+                onChange={(event) =>
+                  setEmployeeForm((current) => ({ ...current, shift_name: event.target.value }))
+                }
+              />
+            </label>
+            <div className="page-grid page-grid--two-up">
+              <label className="field">
+                <span>Shift start</span>
+                <input
+                  type="time"
+                  value={employeeForm.shift_start_time}
+                  onChange={(event) =>
+                    setEmployeeForm((current) => ({ ...current, shift_start_time: event.target.value }))
+                  }
+                />
+              </label>
+              <label className="field">
+                <span>Shift end</span>
+                <input
+                  type="time"
+                  value={employeeForm.shift_end_time}
+                  onChange={(event) =>
+                    setEmployeeForm((current) => ({ ...current, shift_end_time: event.target.value }))
+                  }
+                />
+              </label>
+            </div>
+            <label className="field">
+              <span>Grace minutes</span>
+              <input
+                type="number"
+                min={0}
+                max={180}
+                value={employeeForm.shift_grace_minutes}
+                onChange={(event) =>
+                  setEmployeeForm((current) => ({
+                    ...current,
+                    shift_grace_minutes: Number(event.target.value || 0),
+                  }))
+                }
+              />
+            </label>
+            <div className="field">
+              <span>Working days</span>
+              <div className="toolbar">
+                {weekdayOptions.map((day) => (
+                  <label key={day.key} className="field field--inline">
+                    <input
+                      type="checkbox"
+                      checked={employeeForm.shift_days.includes(day.key)}
+                      onChange={() => toggleShiftDay(day.key)}
+                    />
+                    <span>{day.label}</span>
+                  </label>
+                ))}
+              </div>
+            </div>
             {error ? <p className="form-error">{error}</p> : null}
             <button className="primary-button" disabled={!sites.length} type="submit">
               Create employee
@@ -325,6 +489,7 @@ export function EmployeesPage() {
                     <div>
                       <strong>{employee.first_name} {employee.last_name}</strong>
                       <p>{employee.employee_code} | {employee.role_title || 'Role not set'}</p>
+                      <small>{employee.shift_name} | {formatShiftWindow(employee.shift_start_time, employee.shift_end_time, employee.shift_days)}</small>
                       <small>{employee.face_profiles.length} face profile(s)</small>
                     </div>
                     <div className="stack-sm align-end">
@@ -391,6 +556,9 @@ export function EmployeesPage() {
                 <p>
                   {report.employee.employee_code} | {report.employee.role_title || 'Role not set'} | {report.employee.site_name || 'No site'}
                 </p>
+                <small>
+                  Shift: {report.employee.shift_name} | {formatShiftWindow(report.employee.shift_start_time, report.employee.shift_end_time, report.employee.shift_days)}
+                </small>
                 <small>
                   Report window: {formatDateTime(report.window_start)} to {formatDateTime(report.window_end)} | Timezone: {report.employee.timezone}
                 </small>
@@ -475,6 +643,50 @@ export function EmployeesPage() {
                 )}
               </Panel>
             </div>
+
+            <Panel
+              title="Shift Attendance"
+              subtitle="This compares actual sightings against the employee's planned shift."
+            >
+              <div className="stats-grid">
+                <article className="stat-card">
+                  <p>Scheduled Days</p>
+                  <strong>{report.attendance_totals.scheduled_days}</strong>
+                </article>
+                <article className="stat-card">
+                  <p>Attended Days</p>
+                  <strong>{report.attendance_totals.attended_days}</strong>
+                </article>
+                <article className="stat-card">
+                  <p>On-Time Days</p>
+                  <strong>{report.attendance_totals.on_time_days}</strong>
+                </article>
+                <article className="stat-card">
+                  <p>Late Days</p>
+                  <strong>{report.attendance_totals.late_days}</strong>
+                </article>
+                <article className="stat-card">
+                  <p>Missed Days</p>
+                  <strong>{report.attendance_totals.missed_days}</strong>
+                </article>
+                <article className="stat-card">
+                  <p>Off-Day Activity</p>
+                  <strong>{report.attendance_totals.off_day_activity_days}</strong>
+                </article>
+                <article className="stat-card">
+                  <p>Outside Shift Sightings</p>
+                  <strong>{report.attendance_totals.outside_shift_sighting_count}</strong>
+                </article>
+              </div>
+
+              {report.attendance_days.length ? (
+                <div className="list">
+                  {report.attendance_days.map(renderAttendanceDay)}
+                </div>
+              ) : (
+                <EmptyState message="No shift attendance data is available in the selected range yet." />
+              )}
+            </Panel>
 
             <Panel title="Day By Day" subtitle="This shows when the employee was first seen, last seen, and whether alerts happened that day.">
               {report.daily_summaries.length ? (

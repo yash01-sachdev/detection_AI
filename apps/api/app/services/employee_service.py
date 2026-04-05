@@ -42,7 +42,19 @@ def create_employee(db: Session, payload: EmployeeCreate) -> Employee:
             detail="Employee code already exists.",
         )
 
-    employee = Employee(**payload.model_dump(mode="python"))
+    employee = Employee(
+        site_id=payload.site_id,
+        employee_code=payload.employee_code,
+        first_name=payload.first_name,
+        last_name=payload.last_name,
+        role_title=payload.role_title,
+        is_active=payload.is_active,
+        shift_name=payload.shift_name,
+        shift_start_time=payload.shift_start_time,
+        shift_end_time=payload.shift_end_time,
+        shift_grace_minutes=payload.shift_grace_minutes,
+    )
+    employee.shift_days = payload.shift_days
     db.add(employee)
     db.commit()
     db.refresh(employee)

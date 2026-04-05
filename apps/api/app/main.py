@@ -4,6 +4,7 @@ from pathlib import Path
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
+from sqlalchemy import inspect, text
 
 from app.api.router import api_router
 from app.core.config import get_settings
@@ -22,6 +23,7 @@ media_dir.mkdir(parents=True, exist_ok=True)
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     Base.metadata.create_all(bind=engine)
+    _ensure_employee_shift_columns()
     with SessionLocal() as db:
         bootstrap_default_admin(db)
     yield
@@ -40,3 +42,26 @@ app.add_middleware(
 app.include_router(api_router, prefix=settings.api_v1_prefix)
 app.mount("/live-media", StaticFiles(directory=live_media_dir), name="live-media")
 app.mount("/media", StaticFiles(directory=media_dir), name="media")
+
+
+def _ensure_employee_shift_columns() -> None:
+    inspector = inspect(engine)
+    if "employees" not in inspector.get_table_names():
+        return
+
+    existing_columns = {column["name"] for column in inspector.get_columns("employees")}
+    statements = {
+        "shift_name": "ALTER TABLE employees ADD COLUMN shift_name VARCHAR(120) NOT NULL DEFAULT 'Day Shift'",
+        "shift_start_time": "ALTER TABLE employees ADD COLUMN shift_start_time VARCHAR(5) NOT NULL DEFAULT '09:00'",
+        "shift_end_time": "ALTER TABLE employees ADD COLUMN shift_end_time VARCHAR(5) NOT NULL DEFAULT '17:00'",
+        "shift_grace_minutes": "ALTER TABLE employees ADD COLUMN shift_grace_minutes INTEGER NOT NULL DEFAULT 10",
+        "shift_days": "ALTER TABLE employees ADD COLUMN shift_days VARCHAR(64) NOT NULL DEFAULT 'mon,tue,wed,thu,fri'",
+    }
+
+    pending = [sql for column_name, sql in statements.items() if column_name not in existing_columns]
+    if not pending:
+        return
+
+    with engine.begin() as connection:
+        for statement in pending:
+            connection.execute(text(statement))

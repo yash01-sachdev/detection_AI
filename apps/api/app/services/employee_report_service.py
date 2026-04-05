@@ -1,6 +1,6 @@
 from collections import Counter, defaultdict
 from dataclasses import dataclass
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, time, timedelta
 from zoneinfo import ZoneInfo
 
 from fastapi import HTTPException, status
@@ -9,6 +9,8 @@ from sqlalchemy.orm import Session
 
 from app.models import Alert, Camera, Employee, Event, Site
 from app.schemas.monitoring import (
+    EmployeeAttendanceDay,
+    EmployeeAttendanceTotals,
     EmployeeDaySummary,
     EmployeeReportRead,
     EmployeeReportSubject,
@@ -21,12 +23,26 @@ SESSION_GAP_MINUTES = 15
 MIN_SESSION_MINUTES = 1
 MAX_REPORT_DAYS = 90
 MAX_TIMELINE_ITEMS = 40
+DEFAULT_SHIFT_DAYS = ["mon", "tue", "wed", "thu", "fri"]
+WEEKDAY_KEYS = ("mon", "tue", "wed", "thu", "fri", "sat", "sun")
 
 
 @dataclass
 class SessionWindow:
     start: datetime
     end: datetime
+
+
+@dataclass(frozen=True)
+class ShiftSchedule:
+    name: str
+    start_text: str
+    end_text: str
+    grace_minutes: int
+    days: list[str]
+    start_time: time
+    end_time: time
+    crosses_midnight: bool
 
 
 def build_employee_report(db: Session, employee_id: str, days: int) -> EmployeeReportRead:
@@ -53,12 +69,20 @@ def build_employee_report_at(
     window_end = reference_time or datetime.now(UTC)
     window_start = window_end - timedelta(days=clamped_days)
 
+    schedule = _build_shift_schedule(employee)
     cameras = _load_cameras_by_id(db, employee.site_id)
     events = _load_employee_events(db, employee, window_start, window_end)
     alerts = _load_employee_alerts(db, employee, window_start, window_end)
 
     zone_visits = _build_zone_visits(events)
     day_summaries = _build_day_summaries(events, alerts, timezone)
+    attendance_totals, attendance_days = _build_attendance_days(
+        events,
+        schedule,
+        timezone,
+        window_start,
+        window_end,
+    )
     timeline = _build_recent_timeline(events, alerts, cameras, timezone)
 
     return EmployeeReportRead(
@@ -70,6 +94,12 @@ def build_employee_report_at(
             site_id=employee.site_id,
             site_name=site.name if site is not None else None,
             timezone=timezone_name,
+            shift_name=schedule.name,
+            shift_start_time=schedule.start_text,
+            shift_end_time=schedule.end_text,
+            shift_grace_minutes=schedule.grace_minutes,
+            shift_days=schedule.days,
+            shift_crosses_midnight=schedule.crosses_midnight,
         ),
         generated_at=window_end,
         window_start=window_start,
@@ -85,9 +115,30 @@ def build_employee_report_at(
             inactivity_event_count=sum(1 for event in events if _event_is_inactive(event)),
             longest_inactivity_seconds=max((_event_inactive_seconds(event) for event in events), default=0),
         ),
+        attendance_totals=attendance_totals,
         zone_visits=zone_visits,
         daily_summaries=day_summaries,
+        attendance_days=attendance_days,
         recent_timeline=timeline,
+    )
+
+
+def _build_shift_schedule(employee: Employee) -> ShiftSchedule:
+    start_text = _normalize_shift_time(employee.shift_start_time, "09:00")
+    end_text = _normalize_shift_time(employee.shift_end_time, "17:00")
+    start_time = datetime.strptime(start_text, "%H:%M").time()
+    end_time = datetime.strptime(end_text, "%H:%M").time()
+    days = [day for day in (employee.shift_days or DEFAULT_SHIFT_DAYS) if day in WEEKDAY_KEYS] or list(DEFAULT_SHIFT_DAYS)
+
+    return ShiftSchedule(
+        name=(employee.shift_name or "Day Shift").strip() or "Day Shift",
+        start_text=start_text,
+        end_text=end_text,
+        grace_minutes=max(int(employee.shift_grace_minutes or 0), 0),
+        days=days,
+        start_time=start_time,
+        end_time=end_time,
+        crosses_midnight=end_time <= start_time,
     )
 
 
@@ -209,6 +260,112 @@ def _build_day_summaries(
     return day_summaries
 
 
+def _build_attendance_days(
+    events: list[Event],
+    schedule: ShiftSchedule,
+    timezone: ZoneInfo,
+    window_start: datetime,
+    window_end: datetime,
+) -> tuple[EmployeeAttendanceTotals, list[EmployeeAttendanceDay]]:
+    events_by_attendance_day: dict[str, list[tuple[Event, datetime]]] = defaultdict(list)
+    for event in events:
+        local_time = _as_local_time(event.occurred_at, timezone)
+        attendance_day = _attendance_day_key(local_time, schedule)
+        events_by_attendance_day[attendance_day].append((event, local_time))
+
+    local_start_day = window_start.astimezone(timezone).date()
+    local_end_day = window_end.astimezone(timezone).date()
+    attendance_days: list[EmployeeAttendanceDay] = []
+
+    current_day = local_end_day
+    while current_day >= local_start_day:
+        day_key = current_day.isoformat()
+        is_scheduled = _weekday_key(current_day) in schedule.days
+        day_events = sorted(events_by_attendance_day.get(day_key, []), key=lambda item: item[1])
+
+        if not is_scheduled and not day_events:
+            current_day -= timedelta(days=1)
+            continue
+
+        if is_scheduled:
+            attendance_days.append(
+                _build_scheduled_attendance_day(
+                    current_day=current_day,
+                    day_events=day_events,
+                    schedule=schedule,
+                    timezone=timezone,
+                )
+            )
+        else:
+            attendance_days.append(_build_off_day_activity(day_key, day_events))
+
+        current_day -= timedelta(days=1)
+
+    totals = EmployeeAttendanceTotals(
+        scheduled_days=sum(1 for day in attendance_days if day.is_scheduled),
+        attended_days=sum(1 for day in attendance_days if day.status in {"on_time", "late"}),
+        on_time_days=sum(1 for day in attendance_days if day.status == "on_time"),
+        late_days=sum(1 for day in attendance_days if day.status == "late"),
+        missed_days=sum(1 for day in attendance_days if day.status == "missed"),
+        off_day_activity_days=sum(1 for day in attendance_days if day.status == "off_day_activity"),
+        outside_shift_sighting_count=sum(day.outside_shift_sighting_count for day in attendance_days),
+    )
+    return totals, attendance_days
+
+
+def _build_scheduled_attendance_day(
+    *,
+    current_day: date,
+    day_events: list[tuple[Event, datetime]],
+    schedule: ShiftSchedule,
+    timezone: ZoneInfo,
+) -> EmployeeAttendanceDay:
+    shift_start, shift_end = _shift_window_for_day(current_day, schedule, timezone)
+    grace_cutoff = shift_start + timedelta(minutes=schedule.grace_minutes)
+
+    if not day_events:
+        return EmployeeAttendanceDay(
+            date=current_day.isoformat(),
+            is_scheduled=True,
+            status="missed",
+        )
+
+    first_seen = day_events[0][1]
+    last_seen = day_events[-1][1]
+    outside_shift_sightings = sum(
+        1
+        for _, local_time in day_events
+        if local_time < shift_start or local_time > shift_end
+    )
+    arrival_delta_minutes = int((first_seen - shift_start).total_seconds() // 60)
+
+    return EmployeeAttendanceDay(
+        date=current_day.isoformat(),
+        is_scheduled=True,
+        status="on_time" if first_seen <= grace_cutoff else "late",
+        first_seen_at=first_seen,
+        last_seen_at=last_seen,
+        arrival_delta_minutes=arrival_delta_minutes,
+        outside_shift_sighting_count=outside_shift_sightings,
+    )
+
+
+def _build_off_day_activity(
+    day_key: str,
+    day_events: list[tuple[Event, datetime]],
+) -> EmployeeAttendanceDay:
+    first_seen = day_events[0][1] if day_events else None
+    last_seen = day_events[-1][1] if day_events else None
+    return EmployeeAttendanceDay(
+        date=day_key,
+        is_scheduled=False,
+        status="off_day_activity",
+        first_seen_at=first_seen,
+        last_seen_at=last_seen,
+        outside_shift_sighting_count=len(day_events),
+    )
+
+
 def _build_presence_sessions(events: list[Event]) -> list[SessionWindow]:
     if not events:
         return []
@@ -246,7 +403,7 @@ def _build_recent_timeline(
         timeline_items.append(
             EmployeeTimelineItem(
                 item_type="alert",
-                occurred_at=alert.occurred_at.astimezone(timezone),
+                occurred_at=_as_local_time(alert.occurred_at, timezone),
                 title=alert.title,
                 description=_build_timeline_description(
                     zone_name=str(details.get("zone_name") or "").strip(),
@@ -272,7 +429,7 @@ def _build_recent_timeline(
         timeline_items.append(
             EmployeeTimelineItem(
                 item_type="event",
-                occurred_at=event.occurred_at.astimezone(timezone),
+                occurred_at=_as_local_time(event.occurred_at, timezone),
                 title=_build_event_title(subject, posture),
                 description=_build_timeline_description(
                     zone_name=zone_name,
@@ -295,6 +452,21 @@ def _build_recent_timeline(
     return timeline_items[:MAX_TIMELINE_ITEMS]
 
 
+def _shift_window_for_day(day: date, schedule: ShiftSchedule, timezone: ZoneInfo) -> tuple[datetime, datetime]:
+    shift_start = datetime.combine(day, schedule.start_time, tzinfo=timezone)
+    shift_end = datetime.combine(day, schedule.end_time, tzinfo=timezone)
+    if schedule.crosses_midnight:
+        shift_end += timedelta(days=1)
+    return shift_start, shift_end
+
+
+def _attendance_day_key(local_time: datetime, schedule: ShiftSchedule) -> str:
+    attendance_day = local_time.date()
+    if schedule.crosses_midnight and local_time.timetz().replace(tzinfo=None) < schedule.end_time:
+        attendance_day -= timedelta(days=1)
+    return attendance_day.isoformat()
+
+
 def _is_violation_alert(alert: Alert) -> bool:
     details = dict(alert.details or {})
     if bool(details.get("zone_restricted")):
@@ -303,7 +475,11 @@ def _is_violation_alert(alert: Alert) -> bool:
 
 
 def _local_day_key(value: datetime, timezone: ZoneInfo) -> str:
-    return value.astimezone(timezone).date().isoformat()
+    return _as_local_time(value, timezone).date().isoformat()
+
+
+def _weekday_key(value: date) -> str:
+    return WEEKDAY_KEYS[value.weekday()]
 
 
 def _event_is_inactive(event: Event) -> bool:
@@ -342,8 +518,23 @@ def _normalize_posture(value: object) -> str | None:
     return posture or None
 
 
+def _normalize_shift_time(value: object, fallback: str) -> str:
+    text = str(value or fallback).strip()
+    try:
+        datetime.strptime(text, "%H:%M")
+    except ValueError:
+        return fallback
+    return text
+
+
 def _coerce_int(value: object) -> int:
     try:
         return max(int(value or 0), 0)
     except (TypeError, ValueError):
         return 0
+
+
+def _as_local_time(value: datetime, timezone: ZoneInfo) -> datetime:
+    if value.tzinfo is None:
+        value = value.replace(tzinfo=UTC)
+    return value.astimezone(timezone)

@@ -71,8 +71,38 @@ class EmployeeServiceTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsNotNone(stored_employee)
         self.assertIsNotNone(stored_profile)
         self.assertEqual(stored_employee.employee_code, "EMP-100")
+        self.assertEqual(stored_employee.shift_name, "Day Shift")
+        self.assertEqual(stored_employee.shift_start_time, "09:00")
+        self.assertEqual(stored_employee.shift_days, ["mon", "tue", "wed", "thu", "fri"])
         self.assertEqual(stored_profile.employee_id, employee.id)
         self.assertTrue(stored_profile.source_image_path.startswith("/media/faces/"))
+
+    def test_create_employee_persists_custom_shift_schedule(self) -> None:
+        employee = employee_service.create_employee(
+            self.db,
+            EmployeeCreate(
+                site_id=self.site.id,
+                employee_code="EMP-250",
+                first_name="Night",
+                last_name="Watch",
+                role_title="Supervisor",
+                shift_name="Night Shift",
+                shift_start_time="22:00",
+                shift_end_time="06:00",
+                shift_grace_minutes=15,
+                shift_days=["mon", "tue", "wed", "thu", "fri", "sat"],
+                is_active=True,
+            ),
+        )
+
+        stored_employee = self.db.scalar(select(Employee).where(Employee.id == employee.id))
+
+        self.assertIsNotNone(stored_employee)
+        self.assertEqual(stored_employee.shift_name, "Night Shift")
+        self.assertEqual(stored_employee.shift_start_time, "22:00")
+        self.assertEqual(stored_employee.shift_end_time, "06:00")
+        self.assertEqual(stored_employee.shift_grace_minutes, 15)
+        self.assertEqual(stored_employee.shift_days, ["mon", "tue", "wed", "thu", "fri", "sat"])
 
     def test_create_employee_rejects_duplicate_employee_code(self) -> None:
         employee_service.create_employee(
