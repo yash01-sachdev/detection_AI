@@ -231,7 +231,7 @@ def _find_matching_rule(
         db.scalars(
             select(Rule)
             .where(Rule.site_id == site_id, Rule.is_enabled.is_(True))
-            .order_by(Rule.is_default.desc(), Rule.created_at.asc())
+            .order_by(Rule.is_default.asc(), Rule.created_at.asc())
         )
     )
 
@@ -251,6 +251,7 @@ def _rule_matches(
     zone_type = zone.zone_type.value if zone is not None else None
     actual_values = {
         "entity_type": _normalize_value(payload.entity_type),
+        "zone_id": zone.id if zone is not None else None,
         "zone_type": zone_type,
         "posture": details.get("posture"),
         "label": payload.label,

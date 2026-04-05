@@ -200,6 +200,109 @@ class MonitoringServiceTests(unittest.TestCase):
         self.assertEqual(employee_alert_title, "Employee In Smoking Area")
         self.assertIsNone(person_response.alert_id)
 
+    def test_custom_zone_rule_overrides_generic_default_rule(self) -> None:
+        site, camera, zone = self._create_site_camera_zone(
+            site_type=SiteType.office,
+            zone_type=ZoneType.restricted,
+            zone_name="Payroll Room",
+            is_restricted=True,
+        )
+
+        with self.SessionLocal() as db:
+            custom_rule = Rule(
+                site_id=site.id,
+                applies_to_site_type=SiteType.office,
+                template_key="custom_employee_payroll_room",
+                name="Employee In Payroll Room",
+                description="Alert when a recognized employee enters the payroll room.",
+                conditions={"entity_type": "employee", "zone_id": zone.id},
+                actions={"create_alert": True, "snapshot": True},
+                severity="critical",
+                is_default=False,
+                is_enabled=True,
+            )
+            db.add(custom_rule)
+            db.commit()
+
+            response = ingest_detection_event(
+                db,
+                DetectionIngestRequest(
+                    site_id=site.id,
+                    camera_id=camera.id,
+                    zone_id=zone.id,
+                    entity_type=EntityType.employee,
+                    label="Live Verify",
+                    track_id="t-payroll",
+                    confidence=0.93,
+                    occurred_at=datetime.now(UTC),
+                    details={"employee_id": "employee-9", "employee_code": "EMP-909", "source": "unit-test"},
+                ),
+            )
+            alert = db.get(Alert, response.alert_id)
+
+        self.assertIsNotNone(alert)
+        self.assertEqual(alert.title, "Employee In Payroll Room")
+        self.assertEqual(alert.severity.value, "critical")
+
+    def test_custom_zone_rule_does_not_match_other_zones(self) -> None:
+        site, camera, payroll_zone = self._create_site_camera_zone(
+            site_type=SiteType.office,
+            zone_type=ZoneType.restricted,
+            zone_name="Payroll Room",
+            is_restricted=True,
+        )
+
+        with self.SessionLocal() as db:
+            second_zone = Zone(
+                site_id=site.id,
+                name="Server Room",
+                zone_type=ZoneType.restricted,
+                color="#c44f4f",
+                is_restricted=True,
+                points=[
+                    {"x": 40.0, "y": 40.0},
+                    {"x": 580.0, "y": 40.0},
+                    {"x": 580.0, "y": 420.0},
+                    {"x": 40.0, "y": 420.0},
+                ],
+            )
+            db.add(second_zone)
+            db.add(
+                Rule(
+                    site_id=site.id,
+                    applies_to_site_type=SiteType.office,
+                    template_key="custom_employee_payroll_room_only",
+                    name="Employee In Payroll Room",
+                    description="Alert when a recognized employee enters the payroll room.",
+                    conditions={"entity_type": "employee", "zone_id": payroll_zone.id},
+                    actions={"create_alert": True, "snapshot": True},
+                    severity="critical",
+                    is_default=False,
+                    is_enabled=True,
+                )
+            )
+            db.commit()
+            db.refresh(second_zone)
+
+            response = ingest_detection_event(
+                db,
+                DetectionIngestRequest(
+                    site_id=site.id,
+                    camera_id=camera.id,
+                    zone_id=second_zone.id,
+                    entity_type=EntityType.employee,
+                    label="Live Verify",
+                    track_id="t-server",
+                    confidence=0.91,
+                    occurred_at=datetime.now(UTC),
+                    details={"employee_id": "employee-9", "employee_code": "EMP-909", "source": "unit-test"},
+                ),
+            )
+            alert = db.get(Alert, response.alert_id)
+
+        self.assertIsNotNone(alert)
+        self.assertEqual(alert.title, "Restricted Zone Entry")
+
 
 if __name__ == "__main__":
     unittest.main()
