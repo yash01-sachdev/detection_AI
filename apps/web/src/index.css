@@ -374,6 +374,22 @@ a {
   flex-shrink: 0;
 }
 
+.alert-card__content {
+  display: grid;
+  gap: 0.45rem;
+  min-width: 0;
+}
+
+.alert-card__content p {
+  margin: 0;
+}
+
+.alert-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+}
+
 .list-row--top {
   align-items: flex-start;
 }

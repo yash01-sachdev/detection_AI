@@ -1,9 +1,10 @@
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
+from app.core.config import get_settings
 from app.models.alert import Alert
 from app.models.camera import Camera
 from app.models.enums import AlertStatus, RuleSeverity, SiteType
@@ -170,6 +171,10 @@ def ingest_detection_event(db: Session, payload: DetectionIngestRequest) -> Dete
     occurred_at = payload.occurred_at or datetime.now(UTC)
     zone = db.get(Zone, payload.zone_id) if payload.zone_id else None
     details = dict(payload.details)
+    details.setdefault("track_id", payload.track_id)
+    details.setdefault("entity_type", _normalize_value(payload.entity_type))
+    details.setdefault("zone_id", payload.zone_id)
+    details.setdefault("subject_label", payload.label)
     if zone is not None:
         details.setdefault("zone_name", zone.name)
         details.setdefault("zone_type", zone.zone_type.value)
@@ -199,22 +204,40 @@ def ingest_detection_event(db: Session, payload: DetectionIngestRequest) -> Dete
 
     alert_id: str | None = None
     if alert_data is not None:
-        alert = Alert(
-            site_id=payload.site_id,
-            camera_id=payload.camera_id,
-            rule_id=alert_data["rule_id"],
-            event_id=event.id,
-            title=alert_data["title"],
-            description=alert_data["description"],
-            severity=alert_data["severity"],
-            status=AlertStatus.open,
-            snapshot_path=payload.snapshot_path,
-            occurred_at=occurred_at,
+        duplicate_alert = _find_recent_duplicate_alert(
+            db=db,
+            payload=payload,
+            alert_data=alert_data,
             details=details,
+            occurred_at=occurred_at,
         )
-        db.add(alert)
-        db.flush()
-        alert_id = alert.id
+
+        if duplicate_alert is not None:
+            _merge_duplicate_alert(
+                alert=duplicate_alert,
+                event=event,
+                payload=payload,
+                details=details,
+                occurred_at=occurred_at,
+            )
+            alert_id = duplicate_alert.id
+        else:
+            alert = Alert(
+                site_id=payload.site_id,
+                camera_id=payload.camera_id,
+                rule_id=alert_data["rule_id"],
+                event_id=event.id,
+                title=alert_data["title"],
+                description=alert_data["description"],
+                severity=alert_data["severity"],
+                status=AlertStatus.open,
+                snapshot_path=payload.snapshot_path,
+                occurred_at=occurred_at,
+                details=_build_alert_details(details, alert_data, occurred_at),
+            )
+            db.add(alert)
+            db.flush()
+            alert_id = alert.id
 
     db.commit()
     return DetectionIngestResponse(event_id=event.id, alert_id=alert_id)
@@ -240,6 +263,85 @@ def _find_matching_rule(
             return rule
 
     return None
+
+
+def _find_recent_duplicate_alert(
+    *,
+    db: Session,
+    payload: DetectionIngestRequest,
+    alert_data: dict[str, Any],
+    details: dict[str, object],
+    occurred_at: datetime,
+) -> Alert | None:
+    settings = get_settings()
+    cutoff = occurred_at - timedelta(seconds=max(settings.alert_dedup_seconds, 1))
+
+    recent_alerts = list(
+        db.scalars(
+            select(Alert)
+            .where(
+                Alert.site_id == payload.site_id,
+                Alert.camera_id == payload.camera_id,
+                Alert.status == AlertStatus.open,
+                Alert.occurred_at >= cutoff,
+            )
+            .order_by(Alert.occurred_at.desc())
+            .limit(20)
+        )
+    )
+
+    current_subject_key = _build_alert_subject_key(payload, details)
+    for alert in recent_alerts:
+        alert_details = dict(alert.details or {})
+        if alert_data["rule_id"] is not None:
+            if alert.rule_id != alert_data["rule_id"]:
+                continue
+        elif alert.title != alert_data["title"]:
+            continue
+        if str(alert_details.get("zone_id") or "") != str(payload.zone_id or ""):
+            continue
+        if str(alert_details.get("subject_key") or "") != current_subject_key:
+            continue
+        return alert
+
+    return None
+
+
+def _merge_duplicate_alert(
+    *,
+    alert: Alert,
+    event: Event,
+    payload: DetectionIngestRequest,
+    details: dict[str, object],
+    occurred_at: datetime,
+) -> None:
+    alert_details = dict(alert.details or {})
+    previous_occurred_at = alert.occurred_at
+    repeat_count = int(alert_details.get("repeat_count", 1)) + 1
+
+    alert.event_id = event.id
+    alert.snapshot_path = payload.snapshot_path or alert.snapshot_path
+    alert.occurred_at = occurred_at
+    alert_details.update(details)
+    alert_details["repeat_count"] = repeat_count
+    alert_details.setdefault("first_seen_at", previous_occurred_at.isoformat())
+    alert_details["last_seen_at"] = occurred_at.isoformat()
+    alert_details["last_confidence"] = payload.confidence
+    alert.details = alert_details
+
+
+def _build_alert_details(
+    details: dict[str, object],
+    alert_data: dict[str, Any],
+    occurred_at: datetime,
+) -> dict[str, object]:
+    alert_details = dict(details)
+    alert_details["subject_key"] = _build_alert_subject_key_from_details(alert_details)
+    alert_details["repeat_count"] = 1
+    alert_details["first_seen_at"] = occurred_at.isoformat()
+    alert_details["last_seen_at"] = occurred_at.isoformat()
+    alert_details["rule_name"] = alert_data["title"]
+    return alert_details
 
 
 def _rule_matches(
@@ -330,6 +432,38 @@ def _normalize_value(value: object) -> object:
     if hasattr(value, "value"):
         return getattr(value, "value")
     return value
+
+
+def _build_alert_subject_key(payload: DetectionIngestRequest, details: dict[str, object]) -> str:
+    employee_id = str(details.get("employee_id") or "").strip()
+    if employee_id:
+        return f"employee:{employee_id}"
+
+    track_id = str(payload.track_id or "").strip()
+    if track_id:
+        return f"track:{track_id}"
+
+    identity = str(details.get("identity") or "").strip()
+    if identity:
+        return f"identity:{identity.lower()}"
+
+    return f"label:{payload.label.lower()}"
+
+
+def _build_alert_subject_key_from_details(details: dict[str, object]) -> str:
+    employee_id = str(details.get("employee_id") or "").strip()
+    if employee_id:
+        return f"employee:{employee_id}"
+
+    track_id = str(details.get("track_id") or "").strip()
+    if track_id:
+        return f"track:{track_id}"
+
+    identity = str(details.get("identity") or "").strip()
+    if identity:
+        return f"identity:{identity.lower()}"
+
+    return f"label:{str(details.get('subject_label') or '').lower()}"
 
 
 def _condition_matches(key: str, actual: object, expected: object) -> bool:

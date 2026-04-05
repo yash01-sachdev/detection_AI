@@ -15,6 +15,7 @@ class Settings(BaseSettings):
     bootstrap_admin_password: str = "Admin12345!"
     bootstrap_admin_full_name: str = "System Admin"
     internal_api_token: str = "internal-local-token"
+    alert_dedup_seconds: int = 20
 
     model_config = SettingsConfigDict(
         env_file=".env",
@@ -30,4 +31,3 @@ class Settings(BaseSettings):
 @lru_cache
 def get_settings() -> Settings:
     return Settings()
-

@@ -5,7 +5,7 @@ from sqlalchemy import create_engine, select
 from sqlalchemy.orm import sessionmaker
 
 from app.db.base import Base
-from app.models import Alert, Camera, Rule, Zone
+from app.models import Alert, Camera, Event, Rule, Zone
 from app.models.enums import CameraSourceType, EntityType, SiteType, ZoneType
 from app.schemas.monitoring import DetectionIngestRequest, SiteCreate
 from app.services.auth_service import bootstrap_default_admin
@@ -302,6 +302,104 @@ class MonitoringServiceTests(unittest.TestCase):
 
         self.assertIsNotNone(alert)
         self.assertEqual(alert.title, "Restricted Zone Entry")
+
+    def test_duplicate_employee_alert_updates_existing_alert(self) -> None:
+        site, camera, zone = self._create_site_camera_zone(
+            site_type=SiteType.office,
+            zone_type=ZoneType.restricted,
+            zone_name="Finance Vault",
+            is_restricted=True,
+        )
+        first_time = datetime(2026, 4, 5, 10, 0, tzinfo=UTC)
+        second_time = datetime(2026, 4, 5, 10, 0, 8, tzinfo=UTC)
+
+        with self.SessionLocal() as db:
+            first_response = ingest_detection_event(
+                db,
+                DetectionIngestRequest(
+                    site_id=site.id,
+                    camera_id=camera.id,
+                    zone_id=zone.id,
+                    entity_type=EntityType.employee,
+                    label="Live Verify",
+                    track_id="t-1",
+                    confidence=0.94,
+                    occurred_at=first_time,
+                    details={"employee_id": "employee-42", "employee_code": "EMP-042", "source": "unit-test"},
+                ),
+            )
+            second_response = ingest_detection_event(
+                db,
+                DetectionIngestRequest(
+                    site_id=site.id,
+                    camera_id=camera.id,
+                    zone_id=zone.id,
+                    entity_type=EntityType.employee,
+                    label="Live Verify",
+                    track_id="t-2",
+                    confidence=0.96,
+                    occurred_at=second_time,
+                    details={"employee_id": "employee-42", "employee_code": "EMP-042", "source": "unit-test"},
+                ),
+            )
+
+            alerts = list(db.scalars(select(Alert).where(Alert.site_id == site.id)))
+            events = list(db.scalars(select(Event).where(Event.site_id == site.id)))
+            alert = db.get(Alert, first_response.alert_id)
+
+        self.assertEqual(first_response.alert_id, second_response.alert_id)
+        self.assertEqual(len(alerts), 1)
+        self.assertEqual(len(events), 2)
+        self.assertIsNotNone(alert)
+        self.assertEqual(alert.details["repeat_count"], 2)
+        self.assertEqual(alert.details["employee_code"], "EMP-042")
+        self.assertEqual(alert.details["first_seen_at"], first_time.isoformat())
+        self.assertEqual(alert.details["last_seen_at"], second_time.isoformat())
+
+    def test_different_unknown_tracks_create_separate_alerts(self) -> None:
+        site, camera, zone = self._create_site_camera_zone(
+            site_type=SiteType.office,
+            zone_type=ZoneType.restricted,
+            zone_name="Server Room",
+            is_restricted=True,
+        )
+        first_time = datetime(2026, 4, 5, 11, 0, tzinfo=UTC)
+        second_time = datetime(2026, 4, 5, 11, 0, 5, tzinfo=UTC)
+
+        with self.SessionLocal() as db:
+            first_response = ingest_detection_event(
+                db,
+                DetectionIngestRequest(
+                    site_id=site.id,
+                    camera_id=camera.id,
+                    zone_id=zone.id,
+                    entity_type=EntityType.person,
+                    label="person",
+                    track_id="t-person-1",
+                    confidence=0.91,
+                    occurred_at=first_time,
+                    details={"source": "unit-test"},
+                ),
+            )
+            second_response = ingest_detection_event(
+                db,
+                DetectionIngestRequest(
+                    site_id=site.id,
+                    camera_id=camera.id,
+                    zone_id=zone.id,
+                    entity_type=EntityType.person,
+                    label="person",
+                    track_id="t-person-2",
+                    confidence=0.89,
+                    occurred_at=second_time,
+                    details={"source": "unit-test"},
+                ),
+            )
+
+            alerts = list(db.scalars(select(Alert).where(Alert.site_id == site.id)))
+
+        self.assertNotEqual(first_response.alert_id, second_response.alert_id)
+        self.assertEqual(len(alerts), 2)
 
 
 if __name__ == "__main__":
