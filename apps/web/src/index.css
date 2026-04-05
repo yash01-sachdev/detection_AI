@@ -374,6 +374,10 @@ a {
   flex-shrink: 0;
 }
 
+.list-row--top {
+  align-items: flex-start;
+}
+
 .info-grid {
   display: grid;
   gap: 0.85rem;
@@ -408,9 +412,35 @@ a {
   margin-top: 0.55rem;
 }
 
+.upload-panel {
+  margin-top: 1rem;
+  padding-top: 1rem;
+  border-top: 1px solid var(--border);
+}
+
+.employee-face-strip {
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.employee-face-thumb {
+  width: 72px;
+  height: 72px;
+  object-fit: cover;
+  border-radius: 0.85rem;
+  border: 1px solid var(--border);
+}
+
 .form-error {
   margin: 0;
   color: #ffb2a2;
+}
+
+.form-success {
+  margin: 0;
+  color: #9fe3bf;
 }
 
 .empty-state {

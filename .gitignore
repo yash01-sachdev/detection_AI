@@ -16,5 +16,7 @@ apps/web/.vite/
 storage/snapshots/*
 storage/clips/*
 storage/live/*
+storage/faces/*
+models/opencv/*
 !storage/snapshots/.gitkeep
 !storage/clips/.gitkeep

@@ -1,7 +1,7 @@
 import httpx
 
 from app.config import Settings
-from app.types import Detection, ZoneDefinition
+from app.types import Detection, EmployeeDefinition, ZoneDefinition
 
 
 class ApiClient:
@@ -20,6 +20,19 @@ class ApiClient:
             response.raise_for_status()
 
         return [ZoneDefinition.model_validate(item) for item in response.json()]
+
+    def fetch_employees(self) -> list[EmployeeDefinition]:
+        if not self.settings.site_id:
+            return []
+
+        with httpx.Client(timeout=20.0) as client:
+            response = client.get(
+                f"{self.settings.api_base_url}/ingest/sites/{self.settings.site_id}/employees",
+                headers={"x-internal-token": self.settings.api_internal_token},
+            )
+            response.raise_for_status()
+
+        return [EmployeeDefinition.model_validate(item) for item in response.json()]
 
     def ingest_detection(self, detection: Detection, snapshot_path: str | None = None) -> None:
         if not self.settings.site_id or not self.settings.camera_id:

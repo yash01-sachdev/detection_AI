@@ -56,6 +56,36 @@ class CameraRead(BaseModel):
     model_config = {"from_attributes": True}
 
 
+class EmployeeFaceProfileRead(BaseModel):
+    id: str
+    employee_id: str
+    source_image_path: str
+
+    model_config = {"from_attributes": True}
+
+
+class EmployeeCreate(BaseModel):
+    site_id: str | None = None
+    employee_code: str = Field(min_length=2, max_length=100)
+    first_name: str = Field(min_length=1, max_length=100)
+    last_name: str = Field(min_length=1, max_length=100)
+    role_title: str = Field(default="", max_length=120)
+    is_active: bool = True
+
+
+class EmployeeRead(BaseModel):
+    id: str
+    site_id: str | None
+    employee_code: str
+    first_name: str
+    last_name: str
+    role_title: str
+    is_active: bool
+    face_profiles: list[EmployeeFaceProfileRead] = Field(default_factory=list)
+
+    model_config = {"from_attributes": True}
+
+
 class ZonePoint(BaseModel):
     x: float
     y: float

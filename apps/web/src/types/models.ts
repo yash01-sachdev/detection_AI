@@ -24,6 +24,23 @@ export type Camera = {
   is_enabled: boolean
 }
 
+export type EmployeeFaceProfile = {
+  id: string
+  employee_id: string
+  source_image_path: string
+}
+
+export type Employee = {
+  id: string
+  site_id: string | null
+  employee_code: string
+  first_name: string
+  last_name: string
+  role_title: string
+  is_active: boolean
+  face_profiles: EmployeeFaceProfile[]
+}
+
 export type ZonePoint = {
   x: number
   y: number

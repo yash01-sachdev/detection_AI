@@ -9,6 +9,7 @@ import { AppShell } from '../components/layout/AppShell'
 import { AlertsPage } from '../features/alerts/AlertsPage'
 import { CamerasPage } from '../features/cameras/CamerasPage'
 import { DashboardPage } from '../features/dashboard/DashboardPage'
+import { EmployeesPage } from '../features/employees/EmployeesPage'
 import { LivePage } from '../features/live/LivePage'
 import { LoginPage } from '../features/auth/LoginPage'
 import { ModesPage } from '../features/modes/ModesPage'
@@ -37,6 +38,7 @@ export const router = createBrowserRouter([
       { index: true, element: <Navigate to="/dashboard" replace /> },
       { path: 'dashboard', element: <DashboardPage /> },
       { path: 'live', element: <LivePage /> },
+      { path: 'employees', element: <EmployeesPage /> },
       { path: 'modes', element: <ModesPage /> },
       { path: 'sites', element: <SitesPage /> },
       { path: 'cameras', element: <CamerasPage /> },

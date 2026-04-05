@@ -24,6 +24,23 @@ class ZoneDefinition(BaseModel):
     points: list[ZonePoint] = Field(default_factory=list)
 
 
+class EmployeeFaceProfileDefinition(BaseModel):
+    id: str
+    employee_id: str
+    source_image_path: str
+
+
+class EmployeeDefinition(BaseModel):
+    id: str
+    site_id: str | None = None
+    employee_code: str
+    first_name: str
+    last_name: str
+    role_title: str
+    is_active: bool
+    face_profiles: list[EmployeeFaceProfileDefinition] = Field(default_factory=list)
+
+
 class Detection(BaseModel):
     label: str
     entity_type: str

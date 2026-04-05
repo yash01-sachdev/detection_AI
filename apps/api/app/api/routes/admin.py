@@ -1,13 +1,14 @@
 import json
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, status
+from fastapi import APIRouter, Depends, File, UploadFile, status
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.api.deps import get_db, require_admin
 from app.models.alert import Alert
 from app.models.camera import Camera
+from app.models.employee import Employee, EmployeeFaceProfile
 from app.models.rule import Rule
 from app.models.site import Site
 from app.models.zone import Zone
@@ -16,6 +17,9 @@ from app.schemas.monitoring import (
     CameraCreate,
     CameraRead,
     DashboardOverview,
+    EmployeeCreate,
+    EmployeeFaceProfileRead,
+    EmployeeRead,
     LiveMonitorStatus,
     ModeTemplate,
     RuleCreate,
@@ -25,6 +29,7 @@ from app.schemas.monitoring import (
     ZoneCreate,
     ZoneRead,
 )
+from app.services.employee_service import add_employee_face_profile, create_employee, list_employees
 from app.services.monitoring_service import (
     build_dashboard_overview,
     create_site_with_default_rules,
@@ -79,6 +84,38 @@ def create_camera(
     db.commit()
     db.refresh(camera)
     return camera
+
+
+@router.get("/employees", response_model=list[EmployeeRead])
+def get_employees(
+    site_id: str | None = None,
+    db: Session = Depends(get_db),
+    _: object = Depends(require_admin),
+) -> list[Employee]:
+    return list_employees(db, site_id=site_id)
+
+
+@router.post("/employees", response_model=EmployeeRead, status_code=status.HTTP_201_CREATED)
+def post_employee(
+    payload: EmployeeCreate,
+    db: Session = Depends(get_db),
+    _: object = Depends(require_admin),
+) -> Employee:
+    return create_employee(db, payload)
+
+
+@router.post(
+    "/employees/{employee_id}/face-profiles",
+    response_model=EmployeeFaceProfileRead,
+    status_code=status.HTTP_201_CREATED,
+)
+async def upload_employee_face_profile(
+    employee_id: str,
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+    _: object = Depends(require_admin),
+) -> EmployeeFaceProfile:
+    return await add_employee_face_profile(db, employee_id, file)
 
 
 @router.get("/zones", response_model=list[ZoneRead])

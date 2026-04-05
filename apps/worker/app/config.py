@@ -18,6 +18,9 @@ class Settings(BaseSettings):
     alert_cooldown_seconds: int = 12
     preview_output_dir: str = "../../storage/live"
     snapshot_output_dir: str = "../../storage/snapshots"
+    face_model_dir: str = "../../models/opencv"
+    face_profile_refresh_seconds: int = 60
+    face_match_threshold: float = 0.45
 
     model_config = SettingsConfigDict(
         env_file=".env",
