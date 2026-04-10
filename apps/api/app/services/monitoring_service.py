@@ -73,14 +73,6 @@ MODE_RULES: dict[SiteType, dict[str, object]] = {
                 "conditions": {"entity_type": "person", "zone_type": "desk", "posture": "head_down"},
                 "actions": {"create_alert": True, "snapshot": True},
             },
-            {
-                "template_key": "office_fall_detection",
-                "name": "Fall Detection",
-                "description": "Alert when a person shows a fall-like posture anywhere in the office.",
-                "severity": RuleSeverity.critical,
-                "conditions": {"entity_type": "person", "posture": "fallen"},
-                "actions": {"create_alert": True, "snapshot": True},
-            },
         ],
     },
     SiteType.restaurant: {
@@ -317,7 +309,8 @@ def _find_recent_duplicate_alert(
         if str(alert_details.get("zone_id") or "") != str(payload.zone_id or ""):
             continue
         if str(alert_details.get("subject_key") or "") != current_subject_key:
-            continue
+            if not _unknown_subjects_likely_match(payload=payload, details=details, alert_details=alert_details):
+                continue
         return alert
 
     return None
@@ -506,3 +499,55 @@ def _entity_type_matches(actual: object, expected: object) -> bool:
         return True
 
     return False
+
+
+def _unknown_subjects_likely_match(
+    *,
+    payload: DetectionIngestRequest,
+    details: dict[str, object],
+    alert_details: dict[str, object],
+) -> bool:
+    current_subject_key = _build_alert_subject_key(payload, details)
+    previous_subject_key = str(alert_details.get("subject_key") or "")
+    if not current_subject_key.startswith("track:") or not previous_subject_key.startswith("track:"):
+        return False
+
+    current_bbox = _extract_bbox(details)
+    previous_bbox = _extract_bbox(alert_details)
+    if current_bbox is None or previous_bbox is None:
+        return False
+
+    current_center = _bbox_center(current_bbox)
+    previous_center = _bbox_center(previous_bbox)
+    current_size = max(current_bbox["x2"] - current_bbox["x1"], current_bbox["y2"] - current_bbox["y1"])
+    previous_size = max(previous_bbox["x2"] - previous_bbox["x1"], previous_bbox["y2"] - previous_bbox["y1"])
+    distance_threshold = max(120.0, (current_size + previous_size) * 0.35)
+
+    return _center_distance(current_center, previous_center) <= distance_threshold
+
+
+def _extract_bbox(details: dict[str, object]) -> dict[str, float] | None:
+    bbox = details.get("bbox")
+    if not isinstance(bbox, dict):
+        return None
+
+    try:
+        x1 = float(bbox["x1"])
+        y1 = float(bbox["y1"])
+        x2 = float(bbox["x2"])
+        y2 = float(bbox["y2"])
+    except (KeyError, TypeError, ValueError):
+        return None
+
+    if x2 <= x1 or y2 <= y1:
+        return None
+
+    return {"x1": x1, "y1": y1, "x2": x2, "y2": y2}
+
+
+def _bbox_center(bbox: dict[str, float]) -> tuple[float, float]:
+    return ((bbox["x1"] + bbox["x2"]) / 2, (bbox["y1"] + bbox["y2"]) / 2)
+
+
+def _center_distance(a: tuple[float, float], b: tuple[float, float]) -> float:
+    return ((a[0] - b[0]) ** 2 + (a[1] - b[1]) ** 2) ** 0.5

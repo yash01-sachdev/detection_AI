@@ -24,6 +24,7 @@ media_dir.mkdir(parents=True, exist_ok=True)
 async def lifespan(_: FastAPI):
     Base.metadata.create_all(bind=engine)
     _ensure_employee_shift_columns()
+    _remove_legacy_fall_rules()
     with SessionLocal() as db:
         bootstrap_default_admin(db)
     yield
@@ -65,3 +66,21 @@ def _ensure_employee_shift_columns() -> None:
     with engine.begin() as connection:
         for statement in pending:
             connection.execute(text(statement))
+
+
+def _remove_legacy_fall_rules() -> None:
+    inspector = inspect(engine)
+    if "rules" not in inspector.get_table_names():
+        return
+
+    with engine.begin() as connection:
+        connection.execute(
+            text(
+                """
+                DELETE FROM rules
+                WHERE template_key = 'office_fall_detection'
+                   OR conditions LIKE '%"posture": "fallen"%'
+                   OR conditions LIKE '%"posture":"fallen"%'
+                """
+            )
+        )

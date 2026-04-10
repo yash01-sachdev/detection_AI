@@ -23,6 +23,16 @@ class TrackRecord:
     missed_frames: int = 0
 
 
+@dataclass
+class ZonePresenceRecord:
+    presence_id: str
+    zone_id: str
+    entity_key: str
+    entity_type: str
+    center: tuple[float, float]
+    missed_frames: int = 0
+
+
 class StableTracker:
     def __init__(self, max_distance_px: float = 140.0, max_missed_frames: int = 6) -> None:
         self.max_distance_px = max_distance_px
@@ -148,6 +158,12 @@ class MonitoringPipeline:
         self.face_recognizer = face_recognizer or NoopFaceRecognizer()
         self.posture_analyzer = posture_analyzer or NoopPostureAnalyzer()
         self.track_state: dict[str, dict[str, str]] = {}
+        self.track_identity_memory: dict[str, dict[str, object]] = {}
+        self.pending_unknown_zone_alerts: dict[str, dict[str, object]] = {}
+        self.zone_presence_counter = 1
+        self.zone_presences: dict[str, ZonePresenceRecord] = {}
+        self.zone_presence_max_missed_frames = 12
+        self.unknown_zone_alert_delay_seconds = 2.5
         self.worker_name = worker_name
         self.camera_source_type = camera_source_type
         self.camera_source = camera_source
@@ -187,9 +203,13 @@ class MonitoringPipeline:
                 self._refresh_zones()
                 detections = self.detector.detect(frame)
                 detections = self.tracker.assign_tracks(detections)
+                self._prune_track_identity_memory()
                 detections = self.face_recognizer.annotate(frame, detections)
+                detections = self._stabilize_identities(detections)
+                detections = _deduplicate_detections(detections)
                 detections = self._assign_zones(detections)
                 detections = self.posture_analyzer.annotate(frame, detections)
+                detections = self._assign_presence_sessions(detections)
                 self._persist_preview(frame, detections, frame_count)
 
                 for detection in detections:
@@ -246,13 +266,21 @@ class MonitoringPipeline:
             logger.warning("Failed to reopen camera source: %s", exc)
 
     def _should_publish(self, detection: Detection) -> bool:
-        if detection.track_id is None:
+        presence_key = str(detection.details.get("presence_key", "")).strip()
+        key = presence_key or detection.track_id
+        if not key:
             return False
 
-        key = detection.track_id
         zone_id = detection.zone_id or ""
         entity_key = _build_entity_key(detection)
         posture = detection.posture or ""
+        zone_restricted = bool(detection.details.get("zone_restricted"))
+        employee_id = str(detection.details.get("employee_id", "")).strip()
+        is_unknown_zone_presence = bool(
+            presence_key and zone_id and zone_restricted and detection.entity_type == "person" and not employee_id and not detection.identity
+        )
+        if presence_key and not is_unknown_zone_presence:
+            self.pending_unknown_zone_alerts.pop(presence_key, None)
         last_state = self.track_state.get(key)
 
         current_state = {
@@ -263,6 +291,8 @@ class MonitoringPipeline:
 
         if last_state is None:
             self.track_state[key] = current_state
+            if is_unknown_zone_presence:
+                return self._should_publish_unknown_zone_presence(presence_key)
             return True
 
         last_zone_id = str(last_state.get("zone_id", ""))
@@ -282,6 +312,10 @@ class MonitoringPipeline:
             return bool(posture)
 
         self.track_state[key] = current_state
+        if is_unknown_zone_presence:
+            return self._should_publish_unknown_zone_presence(presence_key)
+        if presence_key:
+            return False
         if not detection.details.get("track_is_new", False):
             return False
         return True
@@ -386,6 +420,180 @@ class MonitoringPipeline:
             message=message,
         )
 
+    def _assign_presence_sessions(self, detections: list[Detection]) -> list[Detection]:
+        if not detections:
+            self._age_presence_sessions(set())
+            return detections
+
+        annotated: list[Detection] = []
+        used_presence_ids: set[str] = set()
+        for detection in detections:
+            if not detection.zone_id:
+                annotated.append(detection)
+                continue
+
+            entity_key = _build_entity_key(detection)
+            presence = self._find_presence_session(detection, entity_key, used_presence_ids)
+            is_new_presence = False
+            center = _bbox_center(detection.bbox)
+
+            if presence is None:
+                presence = self._create_presence_session(detection.zone_id, entity_key, detection.entity_type, center)
+                is_new_presence = True
+            else:
+                presence.center = center
+                presence.missed_frames = 0
+
+            used_presence_ids.add(presence.presence_id)
+            annotated.append(
+                detection.model_copy(
+                    update={
+                        "details": {
+                            **detection.details,
+                            "presence_key": presence.presence_id,
+                            "presence_is_new": is_new_presence,
+                        }
+                    }
+                )
+            )
+
+        self._age_presence_sessions(used_presence_ids)
+        return annotated
+
+    def _stabilize_identities(self, detections: list[Detection]) -> list[Detection]:
+        stabilized: list[Detection] = []
+        for detection in detections:
+            if not detection.track_id:
+                stabilized.append(detection)
+                continue
+
+            memory = self.track_identity_memory.get(detection.track_id)
+            employee_id = str(detection.details.get("employee_id", "")).strip()
+            if detection.entity_type == "employee" and (employee_id or detection.identity):
+                self.track_identity_memory[detection.track_id] = {
+                    "identity": detection.identity,
+                    "employee_id": detection.details.get("employee_id"),
+                    "employee_code": detection.details.get("employee_code"),
+                    "role_title": detection.details.get("role_title"),
+                }
+                stabilized.append(detection)
+                continue
+
+            if detection.entity_type == "person" and memory:
+                updated_details = {**detection.details}
+                for key in ("employee_id", "employee_code", "role_title"):
+                    value = memory.get(key)
+                    if value:
+                        updated_details[key] = value
+                stabilized.append(
+                    detection.model_copy(
+                        update={
+                            "entity_type": "employee",
+                            "identity": str(memory.get("identity") or detection.identity or "").strip() or detection.identity,
+                            "details": updated_details,
+                        }
+                    )
+                )
+                continue
+
+            stabilized.append(detection)
+
+        return stabilized
+
+    def _prune_track_identity_memory(self) -> None:
+        active_track_ids = set(self.tracker.tracks.keys())
+        for track_id in list(self.track_identity_memory.keys()):
+            if track_id not in active_track_ids:
+                self.track_identity_memory.pop(track_id, None)
+
+    def _find_presence_session(
+        self,
+        detection: Detection,
+        entity_key: str,
+        used_presence_ids: set[str],
+    ) -> ZonePresenceRecord | None:
+        if not detection.zone_id:
+            return None
+
+        center = _bbox_center(detection.bbox)
+        candidates = [
+            presence
+            for presence in self.zone_presences.values()
+            if presence.zone_id == detection.zone_id
+            and presence.entity_type == detection.entity_type
+            and presence.presence_id not in used_presence_ids
+        ]
+        if not candidates:
+            return None
+
+        if entity_key.startswith("employee:") or entity_key.startswith("identity:"):
+            for presence in candidates:
+                if presence.entity_key == entity_key:
+                    return presence
+            return None
+
+        best_match: ZonePresenceRecord | None = None
+        best_distance = float("inf")
+        for presence in candidates:
+            if presence.entity_key != entity_key:
+                continue
+            distance = _center_distance(center, presence.center)
+            if distance <= 160 and distance < best_distance:
+                best_match = presence
+                best_distance = distance
+        return best_match
+
+    def _create_presence_session(
+        self,
+        zone_id: str,
+        entity_key: str,
+        entity_type: str,
+        center: tuple[float, float],
+    ) -> ZonePresenceRecord:
+        presence_id = f"p{self.zone_presence_counter}"
+        self.zone_presence_counter += 1
+        presence = ZonePresenceRecord(
+            presence_id=presence_id,
+            zone_id=zone_id,
+            entity_key=entity_key,
+            entity_type=entity_type,
+            center=center,
+            missed_frames=0,
+        )
+        self.zone_presences[presence_id] = presence
+        return presence
+
+    def _age_presence_sessions(self, matched_presence_ids: set[str]) -> None:
+        for presence_id in list(self.zone_presences.keys()):
+            presence = self.zone_presences[presence_id]
+            if presence_id in matched_presence_ids:
+                presence.missed_frames = 0
+                continue
+            presence.missed_frames += 1
+            if presence.missed_frames > self.zone_presence_max_missed_frames:
+                self.zone_presences.pop(presence_id, None)
+                self.pending_unknown_zone_alerts.pop(presence_id, None)
+
+    def _should_publish_unknown_zone_presence(self, presence_key: str) -> bool:
+        now = monotonic()
+        pending = self.pending_unknown_zone_alerts.get(presence_key)
+        if pending is None:
+            self.pending_unknown_zone_alerts[presence_key] = {
+                "first_seen_at": now,
+                "published": False,
+            }
+            return False
+
+        if bool(pending.get("published")):
+            return False
+
+        first_seen_at = float(pending.get("first_seen_at") or now)
+        if now - first_seen_at < self.unknown_zone_alert_delay_seconds:
+            return False
+
+        pending["published"] = True
+        return True
+
     def _write_status(
         self,
         *,
@@ -459,6 +667,31 @@ def _center_distance(a: tuple[float, float], b: tuple[float, float]) -> float:
     return ((a[0] - b[0]) ** 2 + (a[1] - b[1]) ** 2) ** 0.5
 
 
+def _deduplicate_detections(detections: list[Detection]) -> list[Detection]:
+    if len(detections) < 2:
+        return detections
+
+    kept: list[Detection] = []
+    for detection in sorted(detections, key=_detection_sort_key, reverse=True):
+        overlaps_existing = False
+        for existing in kept:
+            if detection.entity_type not in {"person", "employee"} or existing.entity_type not in {"person", "employee"}:
+                continue
+            if _bbox_iou(detection.bbox, existing.bbox) >= 0.45 or _boxes_likely_same_subject(detection.bbox, existing.bbox):
+                overlaps_existing = True
+                break
+        if not overlaps_existing:
+            kept.append(detection)
+    return kept
+
+
+def _detection_sort_key(detection: Detection) -> tuple[int, int, float, float]:
+    has_identity = 1 if detection.identity else 0
+    is_employee = 1 if detection.entity_type == "employee" else 0
+    area = _bbox_area(detection.bbox)
+    return (has_identity, is_employee, detection.confidence, area)
+
+
 def _build_entity_key(detection: Detection) -> str:
     employee_id = str(detection.details.get("employee_id", "")).strip()
     if employee_id:
@@ -498,6 +731,42 @@ def _polygon_area(zone: ZoneDefinition) -> float:
     return abs(area) / 2
 
 
+def _bbox_area(bbox: BoundingBox) -> float:
+    return max(0.0, bbox.x2 - bbox.x1) * max(0.0, bbox.y2 - bbox.y1)
+
+
+def _bbox_iou(first: BoundingBox, second: BoundingBox) -> float:
+    x_left = max(first.x1, second.x1)
+    y_top = max(first.y1, second.y1)
+    x_right = min(first.x2, second.x2)
+    y_bottom = min(first.y2, second.y2)
+
+    intersection_width = max(0.0, x_right - x_left)
+    intersection_height = max(0.0, y_bottom - y_top)
+    intersection = intersection_width * intersection_height
+    if intersection <= 0:
+        return 0.0
+
+    union = _bbox_area(first) + _bbox_area(second) - intersection
+    if union <= 0:
+        return 0.0
+    return intersection / union
+
+
+def _boxes_likely_same_subject(first: BoundingBox, second: BoundingBox) -> bool:
+    first_center = _bbox_center(first)
+    second_center = _bbox_center(second)
+    center_distance = _center_distance(first_center, second_center)
+    largest_dimension = max(
+        first.x2 - first.x1,
+        first.y2 - first.y1,
+        second.x2 - second.x1,
+        second.y2 - second.y1,
+        1.0,
+    )
+    return center_distance <= largest_dimension * 0.35
+
+
 def _posture_suffix(detection: Detection) -> str:
     posture_label = _posture_label(detection)
     return f" ({posture_label})" if posture_label else ""
@@ -509,6 +778,4 @@ def _posture_label(detection: Detection) -> str:
         return f"{inactive_seconds}s inactive" if inactive_seconds else "inactive"
     if detection.posture == "head_down":
         return "head down"
-    if detection.posture == "fallen":
-        return "fall detected"
     return ""

@@ -186,6 +186,7 @@ export function EmployeesPage() {
   const [employees, setEmployees] = useState<Employee[]>([])
   const [employeeForm, setEmployeeForm] = useState(initialEmployeeForm)
   const [selectedEmployeeId, setSelectedEmployeeId] = useState('')
+  const [uploadEmployeeId, setUploadEmployeeId] = useState('')
   const [selectedFile, setSelectedFile] = useState<File | null>(null)
   const [reportDays, setReportDays] = useState(7)
   const [report, setReport] = useState<EmployeeReport | null>(null)
@@ -202,12 +203,30 @@ export function EmployeesPage() {
         }
         if (loadedEmployees.length) {
           setSelectedEmployeeId(loadedEmployees[0].id)
+          setUploadEmployeeId(loadedEmployees[0].id)
         }
       })
       .catch((loadError) => {
         setError(loadError instanceof Error ? loadError.message : 'Unable to load employees.')
       })
   }, [])
+
+  useEffect(() => {
+    const employeeIds = new Set(employees.map((employee) => employee.id))
+    if (selectedEmployeeId && !employeeIds.has(selectedEmployeeId)) {
+      setSelectedEmployeeId(employees[0]?.id ?? '')
+    }
+    if (uploadEmployeeId && !employeeIds.has(uploadEmployeeId)) {
+      setUploadEmployeeId('')
+    }
+    if (!uploadEmployeeId) {
+      if (selectedEmployeeId && employeeIds.has(selectedEmployeeId)) {
+        setUploadEmployeeId(selectedEmployeeId)
+      } else if (employees.length) {
+        setUploadEmployeeId(employees[0].id)
+      }
+    }
+  }, [employees, selectedEmployeeId, uploadEmployeeId])
 
   useEffect(() => {
     if (!selectedEmployeeId) {
@@ -246,8 +265,41 @@ export function EmployeesPage() {
 
   function selectEmployee(employeeId: string) {
     setSelectedEmployeeId(employeeId)
+    setUploadEmployeeId(employeeId)
     setReport(null)
     setUploadMessage('')
+  }
+
+  async function handleDeleteEmployee(employeeId: string) {
+    const employee = employees.find((item) => item.id === employeeId)
+    if (!employee) {
+      return
+    }
+
+    const shouldDelete = window.confirm(
+      `Delete ${employee.first_name} ${employee.last_name} (${employee.employee_code})? This will also remove uploaded face images.`,
+    )
+    if (!shouldDelete) {
+      return
+    }
+
+    setError('')
+    setUploadMessage('')
+
+    try {
+      await apiRequest<void>(`/employees/${employeeId}`, { method: 'DELETE' })
+
+      const remainingEmployees = employees.filter((item) => item.id !== employeeId)
+      setEmployees(remainingEmployees)
+
+      if (selectedEmployeeId === employeeId) {
+        const nextSelectedEmployeeId = remainingEmployees[0]?.id ?? ''
+        setSelectedEmployeeId(nextSelectedEmployeeId)
+        setReport(null)
+      }
+    } catch (deleteError) {
+      setError(deleteError instanceof Error ? deleteError.message : 'Unable to delete employee.')
+    }
   }
 
   function selectReportDays(days: number) {
@@ -281,6 +333,7 @@ export function EmployeesPage() {
       })
       setEmployees((current) => [createdEmployee, ...current])
       selectEmployee(createdEmployee.id)
+      setUploadEmployeeId(createdEmployee.id)
       setEmployeeForm((current) => ({ ...initialEmployeeForm, site_id: current.site_id || employeeForm.site_id }))
     } catch (submissionError) {
       setError(submissionError instanceof Error ? submissionError.message : 'Unable to create employee.')
@@ -292,7 +345,7 @@ export function EmployeesPage() {
     setError('')
     setUploadMessage('')
 
-    if (!selectedEmployeeId || !selectedFile) {
+    if (!uploadEmployeeId || !selectedFile) {
       setError('Choose an employee and a face image first.')
       return
     }
@@ -301,14 +354,14 @@ export function EmployeesPage() {
     formData.append('file', selectedFile)
 
     try {
-      const createdProfile = await apiRequest<EmployeeFaceProfile>(`/employees/${selectedEmployeeId}/face-profiles`, {
+      const createdProfile = await apiRequest<EmployeeFaceProfile>(`/employees/${uploadEmployeeId}/face-profiles`, {
         method: 'POST',
         body: formData,
       })
 
       setEmployees((current) =>
         current.map((employee) =>
-          employee.id === selectedEmployeeId
+          employee.id === uploadEmployeeId
             ? { ...employee, face_profiles: [createdProfile, ...employee.face_profiles] }
             : employee,
         ),
@@ -453,7 +506,7 @@ export function EmployeesPage() {
             </div>
             <label className="field">
               <span>Employee</span>
-              <select value={selectedEmployeeId} onChange={(event) => selectEmployee(event.target.value)}>
+              <select value={uploadEmployeeId} onChange={(event) => setUploadEmployeeId(event.target.value)}>
                 <option value="">Select employee</option>
                 {employeeOptions.map((employee) => (
                   <option key={employee.id} value={employee.id}>
@@ -466,8 +519,14 @@ export function EmployeesPage() {
               <span>Face image</span>
               <input type="file" accept="image/*" onChange={(event) => setSelectedFile(event.target.files?.[0] ?? null)} />
             </label>
+            {uploadEmployeeId ? (
+              <p className="form-success">
+                Upload target:{' '}
+                {employeeOptions.find((employee) => employee.id === uploadEmployeeId)?.label ?? 'Selected employee'}
+              </p>
+            ) : null}
             {uploadMessage ? <p className="form-success">{uploadMessage}</p> : null}
-            <button className="ghost-button" disabled={!employeeOptions.length} type="submit">
+            <button className="ghost-button" disabled={!employeeOptions.length || !uploadEmployeeId || !selectedFile} type="submit">
               Upload face image
             </button>
           </form>
@@ -505,6 +564,9 @@ export function EmployeesPage() {
                       </div>
                       <button className="ghost-button" type="button" onClick={() => selectEmployee(employee.id)}>
                         {isSelected ? 'Viewing report' : 'Open report'}
+                      </button>
+                      <button className="ghost-button" type="button" onClick={() => handleDeleteEmployee(employee.id)}>
+                        Delete employee
                       </button>
                     </div>
                   </article>

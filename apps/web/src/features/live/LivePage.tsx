@@ -39,7 +39,7 @@ export function LivePage() {
     }
 
     loadStatus()
-    const intervalId = window.setInterval(loadStatus, 2500)
+    const intervalId = window.setInterval(loadStatus, 1000)
 
     return () => {
       isMounted = false
@@ -60,7 +60,7 @@ export function LivePage() {
     <div className="page-grid page-grid--two-up">
       <Panel
         title="Live Camera Monitor"
-        subtitle="This is the easiest testing surface: make the camera show you or your room, then watch this page refresh."
+        subtitle="This is the easiest testing surface: make the camera show you or your room, then watch this preview refresh about once a second."
       >
         {error ? <p className="form-error">{error}</p> : null}
         {frameUrl ? (

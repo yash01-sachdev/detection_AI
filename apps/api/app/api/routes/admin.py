@@ -1,7 +1,7 @@
 import json
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, File, UploadFile, status
+from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -31,7 +31,12 @@ from app.schemas.monitoring import (
     ZoneRead,
 )
 from app.services.employee_report_service import build_employee_report
-from app.services.employee_service import add_employee_face_profile, create_employee, list_employees
+from app.services.employee_service import (
+    add_employee_face_profile,
+    create_employee,
+    delete_employee,
+    list_employees,
+)
 from app.services.monitoring_service import (
     build_dashboard_overview,
     create_site_with_default_rules,
@@ -106,6 +111,15 @@ def post_employee(
     return create_employee(db, payload)
 
 
+@router.delete("/employees/{employee_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_employee_route(
+    employee_id: str,
+    db: Session = Depends(get_db),
+    _: object = Depends(require_admin),
+) -> None:
+    delete_employee(db, employee_id)
+
+
 @router.get("/employees/{employee_id}/report", response_model=EmployeeReportRead)
 def get_employee_report(
     employee_id: str,
@@ -153,6 +167,20 @@ def create_zone(
     db.commit()
     db.refresh(zone)
     return zone
+
+
+@router.delete("/zones/{zone_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_zone(
+    zone_id: str,
+    db: Session = Depends(get_db),
+    _: object = Depends(require_admin),
+) -> None:
+    zone = db.get(Zone, zone_id)
+    if zone is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Zone not found.")
+
+    db.delete(zone)
+    db.commit()
 
 
 @router.get("/rules", response_model=list[RuleRead])

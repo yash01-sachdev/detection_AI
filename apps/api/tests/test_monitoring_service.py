@@ -87,14 +87,13 @@ class MonitoringServiceTests(unittest.TestCase):
             rules = list(db.scalars(select(Rule).where(Rule.site_id == site.id)))
 
         self.assertEqual(site.site_type, SiteType.office)
-        self.assertEqual(len(rules), 4)
+        self.assertEqual(len(rules), 3)
         self.assertEqual(
             {rule.template_key for rule in rules},
             {
                 "office_restricted_zone",
                 "office_desk_inactivity",
                 "office_head_down_watch",
-                "office_fall_detection",
             },
         )
 
@@ -280,11 +279,11 @@ class MonitoringServiceTests(unittest.TestCase):
         self.assertEqual(alert.title, "Head-Down Desk Alert")
         self.assertEqual(alert.details["posture"], "head_down")
 
-    def test_office_fall_detection_creates_alert_without_zone(self) -> None:
-        site, camera, _ = self._create_site_camera_zone(
+    def test_plain_person_detection_without_matching_rule_creates_event_but_no_alert(self) -> None:
+        site, camera, zone = self._create_site_camera_zone(
             site_type=SiteType.office,
-            zone_type=ZoneType.general,
-            zone_name="Open Floor",
+            zone_type=ZoneType.desk,
+            zone_name="Desk Test Zone",
             is_restricted=False,
         )
 
@@ -294,19 +293,21 @@ class MonitoringServiceTests(unittest.TestCase):
                 DetectionIngestRequest(
                     site_id=site.id,
                     camera_id=camera.id,
+                    zone_id=zone.id,
                     entity_type=EntityType.person,
                     label="person",
-                    track_id="t-fall-1",
-                    confidence=0.93,
+                    track_id="t-plain-1",
+                    confidence=0.87,
                     occurred_at=datetime.now(UTC),
-                    details={"posture": "fallen", "source": "unit-test"},
+                    details={"bbox": {"x1": 20, "y1": 20, "x2": 220, "y2": 420}, "source": "unit-test"},
                 ),
             )
-            alert = db.get(Alert, response.alert_id)
+            event = db.get(Event, response.event_id)
+            alerts = list(db.scalars(select(Alert).where(Alert.site_id == site.id)))
 
-        self.assertIsNotNone(alert)
-        self.assertEqual(alert.title, "Fall Detection")
-        self.assertEqual(alert.details["posture"], "fallen")
+        self.assertIsNotNone(event)
+        self.assertIsNone(response.alert_id)
+        self.assertEqual(len(alerts), 0)
 
     def test_custom_zone_rule_overrides_generic_default_rule(self) -> None:
         site, camera, zone = self._create_site_camera_zone(
@@ -508,6 +509,64 @@ class MonitoringServiceTests(unittest.TestCase):
 
         self.assertNotEqual(first_response.alert_id, second_response.alert_id)
         self.assertEqual(len(alerts), 2)
+
+    def test_nearby_unknown_tracks_merge_when_bbox_stays_in_same_place(self) -> None:
+        site, camera, zone = self._create_site_camera_zone(
+            site_type=SiteType.office,
+            zone_type=ZoneType.general,
+            zone_name="Open Floor",
+            is_restricted=False,
+        )
+        first_time = datetime(2026, 4, 9, 3, 40, tzinfo=UTC)
+        second_time = datetime(2026, 4, 9, 3, 40, 3, tzinfo=UTC)
+
+        with self.SessionLocal() as db:
+            first_response = ingest_detection_event(
+                db,
+                DetectionIngestRequest(
+                    site_id=site.id,
+                    camera_id=camera.id,
+                    zone_id=zone.id,
+                    entity_type=EntityType.person,
+                    label="person",
+                    track_id="t-person-1",
+                    confidence=0.79,
+                    occurred_at=first_time,
+                    details={
+                        "source": "unit-test",
+                        "bbox": {"x1": 100, "y1": 50, "x2": 260, "y2": 420},
+                    },
+                    alert_title="Person detected",
+                    alert_description="Test alert",
+                ),
+            )
+            second_response = ingest_detection_event(
+                db,
+                DetectionIngestRequest(
+                    site_id=site.id,
+                    camera_id=camera.id,
+                    zone_id=zone.id,
+                    entity_type=EntityType.person,
+                    label="person",
+                    track_id="t-person-2",
+                    confidence=0.81,
+                    occurred_at=second_time,
+                    details={
+                        "source": "unit-test",
+                        "bbox": {"x1": 118, "y1": 52, "x2": 278, "y2": 418},
+                    },
+                    alert_title="Person detected",
+                    alert_description="Test alert",
+                ),
+            )
+
+            alerts = list(db.scalars(select(Alert).where(Alert.site_id == site.id)))
+            merged_alert = db.get(Alert, first_response.alert_id)
+
+        self.assertEqual(first_response.alert_id, second_response.alert_id)
+        self.assertEqual(len(alerts), 1)
+        self.assertIsNotNone(merged_alert)
+        self.assertEqual(merged_alert.details["repeat_count"], 2)
 
 
 if __name__ == "__main__":

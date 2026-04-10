@@ -1,5 +1,4 @@
 from dataclasses import dataclass
-from math import atan2, degrees
 from time import monotonic
 from typing import Any, Callable
 
@@ -30,14 +29,12 @@ class PostureAnalyzer:
         *,
         pose_estimator: BasePoseEstimator | None = None,
         head_down_threshold_seconds: int,
-        fall_threshold_seconds: int,
         inactivity_threshold_seconds: int,
         movement_threshold_px: float,
         clock: Callable[[], float] | None = None,
     ) -> None:
         self.pose_estimator = pose_estimator or NoopPoseEstimator()
         self.head_down_threshold_seconds = max(head_down_threshold_seconds, 1)
-        self.fall_threshold_seconds = max(fall_threshold_seconds, 1)
         self.inactivity_threshold_seconds = max(inactivity_threshold_seconds, 1)
         self.movement_threshold_px = max(movement_threshold_px, 1.0)
         self.clock = clock or monotonic
@@ -118,11 +115,7 @@ class PostureAnalyzer:
             if state.pose_candidate != instant_pose:
                 state.pose_candidate = instant_pose
                 state.pose_candidate_since = now
-            threshold = (
-                self.fall_threshold_seconds
-                if instant_pose == "fallen"
-                else self.head_down_threshold_seconds
-            )
+            threshold = self.head_down_threshold_seconds
             if state.pose_candidate_since is not None and now - state.pose_candidate_since >= threshold:
                 state.active_pose = instant_pose
             return
@@ -161,14 +154,12 @@ def build_posture_analyzer(
     *,
     pose_estimator: BasePoseEstimator | None = None,
     head_down_threshold_seconds: int,
-    fall_threshold_seconds: int,
     inactivity_threshold_seconds: int,
     movement_threshold_px: float,
 ) -> PostureAnalyzer:
     return PostureAnalyzer(
         pose_estimator=pose_estimator,
         head_down_threshold_seconds=head_down_threshold_seconds,
-        fall_threshold_seconds=fall_threshold_seconds,
         inactivity_threshold_seconds=inactivity_threshold_seconds,
         movement_threshold_px=movement_threshold_px,
     )
@@ -203,39 +194,11 @@ def _classify_pose(detection: Detection, pose_match: PoseDetection | None) -> st
     if pose_match is None:
         return None
 
-    if _is_fallen(detection, pose_match):
-        return "fallen"
-
     zone_type = str(detection.details.get("zone_type") or "").strip()
     if zone_type in HEAD_DOWN_ZONE_TYPES and _is_head_down(detection, pose_match):
         return "head_down"
 
     return None
-
-
-def _is_fallen(detection: Detection, pose_match: PoseDetection) -> bool:
-    width = detection.bbox.x2 - detection.bbox.x1
-    height = detection.bbox.y2 - detection.bbox.y1
-    if width <= 0 or height <= 0:
-        return False
-
-    shoulder_mid = _average_keypoint(pose_match, ("left_shoulder", "right_shoulder"))
-    hip_mid = _average_keypoint(pose_match, ("left_hip", "right_hip"))
-    ankle_mid = _average_keypoint(pose_match, ("left_ankle", "right_ankle"))
-
-    visible_points = [point for point in (shoulder_mid, hip_mid, ankle_mid) if point is not None]
-    if len(visible_points) >= 2:
-        horizontal_span = max(point[0] for point in visible_points) - min(point[0] for point in visible_points)
-        vertical_span = max(point[1] for point in visible_points) - min(point[1] for point in visible_points)
-        if horizontal_span > vertical_span * 1.2 and width >= height * 0.95:
-            return True
-
-    if shoulder_mid is not None and hip_mid is not None:
-        torso_angle = abs(degrees(atan2(hip_mid[1] - shoulder_mid[1], hip_mid[0] - shoulder_mid[0])))
-        if torso_angle <= 35 and width >= height * 0.9:
-            return True
-
-    return width >= height * 1.45
 
 
 def _is_head_down(detection: Detection, pose_match: PoseDetection) -> bool:

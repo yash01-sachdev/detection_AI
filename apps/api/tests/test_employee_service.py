@@ -77,6 +77,48 @@ class EmployeeServiceTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(stored_profile.employee_id, employee.id)
         self.assertTrue(stored_profile.source_image_path.startswith("/media/faces/"))
 
+    async def test_delete_employee_removes_face_profiles_and_files(self) -> None:
+        employee = employee_service.create_employee(
+            self.db,
+            EmployeeCreate(
+                site_id=self.site.id,
+                employee_code="EMP-101",
+                first_name="Delete",
+                last_name="Me",
+                role_title="Engineer",
+                is_active=True,
+            ),
+        )
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            original_faces_dir = employee_service.faces_dir
+            employee_service.faces_dir = Path(temp_dir)
+            try:
+                upload = UploadFile(
+                    filename="face.png",
+                    file=BytesIO(
+                        b64decode(
+                            "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO6p6S0AAAAASUVORK5CYII="
+                        )
+                    ),
+                )
+                await employee_service.add_employee_face_profile(self.db, employee.id, upload)
+                employee_dir = employee_service.faces_dir / employee.id
+                self.assertTrue(employee_dir.exists())
+
+                employee_service.delete_employee(self.db, employee.id)
+            finally:
+                employee_service.faces_dir = original_faces_dir
+
+        stored_employee = self.db.scalar(select(Employee).where(Employee.id == employee.id))
+        stored_profiles = list(
+            self.db.scalars(select(EmployeeFaceProfile).where(EmployeeFaceProfile.employee_id == employee.id))
+        )
+
+        self.assertIsNone(stored_employee)
+        self.assertEqual(stored_profiles, [])
+        self.assertFalse(employee_dir.exists())
+
     def test_create_employee_persists_custom_shift_schedule(self) -> None:
         employee = employee_service.create_employee(
             self.db,

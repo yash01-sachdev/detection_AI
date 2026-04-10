@@ -30,7 +30,6 @@ class PostureAnalyzerTests(unittest.TestCase):
         analyzer = PostureAnalyzer(
             pose_estimator=FakePoseEstimator(),
             head_down_threshold_seconds=5,
-            fall_threshold_seconds=2,
             inactivity_threshold_seconds=10,
             movement_threshold_px=18,
             clock=clock.now,
@@ -64,7 +63,6 @@ class PostureAnalyzerTests(unittest.TestCase):
         analyzer = PostureAnalyzer(
             pose_estimator=FakePoseEstimator(),
             head_down_threshold_seconds=5,
-            fall_threshold_seconds=2,
             inactivity_threshold_seconds=10,
             movement_threshold_px=18,
             clock=clock.now,
@@ -100,7 +98,6 @@ class PostureAnalyzerTests(unittest.TestCase):
         analyzer = PostureAnalyzer(
             pose_estimator=pose_estimator,
             head_down_threshold_seconds=5,
-            fall_threshold_seconds=2,
             inactivity_threshold_seconds=15,
             movement_threshold_px=18,
             clock=clock.now,
@@ -134,49 +131,6 @@ class PostureAnalyzerTests(unittest.TestCase):
 
         self.assertIsNone(candidate.posture)
         self.assertEqual(active.posture, "head_down")
-        self.assertEqual(active.details["posture_source"], "pose_model")
-
-    def test_marks_fall_after_pose_is_stable(self) -> None:
-        clock = FakeClock()
-        pose_estimator = FakePoseEstimator()
-        analyzer = PostureAnalyzer(
-            pose_estimator=pose_estimator,
-            head_down_threshold_seconds=5,
-            fall_threshold_seconds=2,
-            inactivity_threshold_seconds=15,
-            movement_threshold_px=18,
-            clock=clock.now,
-        )
-
-        detection = Detection(
-            label="person",
-            entity_type="person",
-            confidence=0.95,
-            bbox=BoundingBox(x1=60, y1=200, x2=280, y2=320),
-            track_id="t4",
-            details={"zone_type": "general", "zone_name": "Open Floor"},
-        )
-        pose_estimator.pose_detections = [
-            _build_pose_detection(
-                bbox=BoundingBox(x1=62, y1=202, x2=278, y2=318),
-                keypoints={
-                    "left_shoulder": (120, 250),
-                    "right_shoulder": (150, 255),
-                    "left_hip": (200, 260),
-                    "right_hip": (230, 265),
-                    "left_ankle": (250, 270),
-                    "right_ankle": (275, 272),
-                },
-            )
-        ]
-
-        clock.set(0)
-        candidate = analyzer.annotate(None, [detection])[0]
-        clock.set(3)
-        active = analyzer.annotate(None, [detection])[0]
-
-        self.assertIsNone(candidate.posture)
-        self.assertEqual(active.posture, "fallen")
         self.assertEqual(active.details["posture_source"], "pose_model")
 
 

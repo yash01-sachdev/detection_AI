@@ -77,6 +77,7 @@ export function ZonesPage() {
   const [status, setStatus] = useState<LiveMonitorStatus | null>(null)
   const [error, setError] = useState('')
   const [saveMessage, setSaveMessage] = useState('')
+  const [deletingZoneId, setDeletingZoneId] = useState('')
   const [imageSize, setImageSize] = useState({ width: 0, height: 0 })
   const imageRef = useRef<HTMLImageElement | null>(null)
 
@@ -218,6 +219,27 @@ export function ZonesPage() {
       setSaveMessage('Zone saved successfully.')
     } catch (submissionError) {
       setError(submissionError instanceof Error ? submissionError.message : 'Unable to create zone.')
+    }
+  }
+
+  async function handleDeleteZone(zone: Zone) {
+    const confirmed = window.confirm(`Delete zone "${zone.name}"?`)
+    if (!confirmed) {
+      return
+    }
+
+    setError('')
+    setSaveMessage('')
+    setDeletingZoneId(zone.id)
+
+    try {
+      await apiRequest(`/zones/${zone.id}`, { method: 'DELETE' })
+      setZones((current) => current.filter((item) => item.id !== zone.id))
+      setSaveMessage(`Deleted zone "${zone.name}".`)
+    } catch (deleteError) {
+      setError(deleteError instanceof Error ? deleteError.message : 'Unable to delete zone.')
+    } finally {
+      setDeletingZoneId('')
     }
   }
 
@@ -439,6 +461,14 @@ export function ZonesPage() {
                 <div className="stack-sm align-end">
                   <span className="pill">{zone.zone_type}</span>
                   <small>{zone.is_restricted ? 'restricted' : 'open'}</small>
+                  <button
+                    className="ghost-button"
+                    type="button"
+                    onClick={() => handleDeleteZone(zone)}
+                    disabled={deletingZoneId === zone.id}
+                  >
+                    {deletingZoneId === zone.id ? 'Deleting...' : 'Delete zone'}
+                  </button>
                 </div>
               </article>
             ))}

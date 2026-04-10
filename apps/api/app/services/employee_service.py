@@ -1,6 +1,7 @@
 from datetime import UTC, datetime
 from pathlib import Path
 from re import sub
+from shutil import rmtree
 
 from fastapi import HTTPException, UploadFile, status
 from sqlalchemy import select
@@ -98,3 +99,24 @@ async def add_employee_face_profile(
     db.commit()
     db.refresh(profile)
     return profile
+
+
+def delete_employee(db: Session, employee_id: str) -> None:
+    employee = db.scalar(
+        select(Employee)
+        .options(selectinload(Employee.face_profiles))
+        .where(Employee.id == employee_id)
+    )
+    if employee is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Employee not found.",
+        )
+
+    employee_face_dir = faces_dir / employee.id
+    for profile in list(employee.face_profiles):
+        db.delete(profile)
+    db.delete(employee)
+    db.commit()
+
+    rmtree(employee_face_dir, ignore_errors=True)

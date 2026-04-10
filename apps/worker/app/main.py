@@ -30,7 +30,6 @@ def main() -> None:
         posture_analyzer=build_posture_analyzer(
             pose_estimator=build_pose_estimator(settings),
             head_down_threshold_seconds=settings.head_down_threshold_seconds,
-            fall_threshold_seconds=settings.fall_threshold_seconds,
             inactivity_threshold_seconds=settings.inactivity_threshold_seconds,
             movement_threshold_px=settings.inactivity_movement_threshold_px,
         ),

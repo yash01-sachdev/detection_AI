@@ -497,8 +497,6 @@ def _build_event_title(subject: str, posture: str | None) -> str:
         return f"{subject} marked inactive"
     if posture == "head_down":
         return f"{subject} marked head-down"
-    if posture == "fallen":
-        return f"{subject} marked fallen"
     return f"{subject} detected"
 
 
@@ -517,9 +515,6 @@ def _build_timeline_description(
     if posture == "head_down":
         zone_label = zone_name or "the monitored area"
         return f"Head-down posture detected in {zone_label}."
-    if posture == "fallen":
-        zone_label = zone_name or "the monitored area"
-        return f"Fall-like posture detected in {zone_label}."
     return fallback
 
 

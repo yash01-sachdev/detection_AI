@@ -282,6 +282,11 @@ a {
   background: rgba(255, 255, 255, 0.04);
 }
 
+.field select option {
+  color: #101819;
+  background: #f4efe6;
+}
+
 .primary-button,
 .ghost-button {
   border-radius: 0.95rem;

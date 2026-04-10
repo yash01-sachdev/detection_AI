@@ -249,7 +249,6 @@ export function RulesPage() {
                 <option value="">Any zone entry</option>
                 <option value="inactive">Inactive</option>
                 <option value="head_down">Head-down posture</option>
-                <option value="fallen">Fall-like posture</option>
               </select>
             </label>
 
