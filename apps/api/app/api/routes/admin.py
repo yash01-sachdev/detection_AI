@@ -12,6 +12,7 @@ from app.models.employee import Employee, EmployeeFaceProfile
 from app.models.known_person import KnownPerson, KnownPersonFaceProfile
 from app.models.rule import Rule
 from app.models.site import Site
+from app.models.user import User
 from app.models.zone import Zone
 from app.schemas.monitoring import (
     AlertRead,
@@ -36,12 +37,14 @@ from app.schemas.monitoring import (
     ZoneCreate,
     ZoneRead,
 )
+from app.schemas.auth import AdminCreateRequest, UserRead
 from app.services.known_person_service import (
     add_known_person_face_profile,
     create_known_person,
     delete_known_person,
     list_known_people,
 )
+from app.services.auth_service import create_admin_user, list_admin_users
 from app.services.employee_report_service import build_employee_report
 from app.services.employee_service import (
     add_employee_face_profile,
@@ -70,6 +73,23 @@ def get_mode_templates(_: object = Depends(require_admin)) -> list[ModeTemplate]
 @router.get("/sites", response_model=list[SiteRead])
 def list_sites(db: Session = Depends(get_db), _: object = Depends(require_admin)) -> list[Site]:
     return list(db.scalars(select(Site).order_by(Site.created_at.desc())))
+
+
+@router.get("/admins", response_model=list[UserRead])
+def get_admin_users(
+    db: Session = Depends(get_db),
+    _: object = Depends(require_admin),
+) -> list[User]:
+    return list_admin_users(db)
+
+
+@router.post("/admins", response_model=UserRead, status_code=status.HTTP_201_CREATED)
+def post_admin_user(
+    payload: AdminCreateRequest,
+    db: Session = Depends(get_db),
+    _: object = Depends(require_admin),
+) -> User:
+    return create_admin_user(db, payload)
 
 
 @router.post("/sites", response_model=SiteRead, status_code=status.HTTP_201_CREATED)

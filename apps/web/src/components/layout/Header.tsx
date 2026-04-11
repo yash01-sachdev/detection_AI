@@ -7,6 +7,7 @@ const PAGE_TITLES: Record<string, string> = {
   '/dashboard': 'Operations Overview',
   '/modes': 'Site Modes',
   '/sites': 'Sites',
+  '/admins': 'Admins',
   '/cameras': 'Cameras',
   '/zones': 'Zones',
   '/rules': 'Rules',

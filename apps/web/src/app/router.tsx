@@ -6,6 +6,7 @@ import {
 } from 'react-router-dom'
 
 import { AppShell } from '../components/layout/AppShell'
+import { AdminsPage } from '../features/admins/AdminsPage'
 import { AlertsPage } from '../features/alerts/AlertsPage'
 import { CamerasPage } from '../features/cameras/CamerasPage'
 import { DashboardPage } from '../features/dashboard/DashboardPage'
@@ -41,6 +42,7 @@ export const router = createBrowserRouter([
       { path: 'employees', element: <EmployeesPage /> },
       { path: 'modes', element: <ModesPage /> },
       { path: 'sites', element: <SitesPage /> },
+      { path: 'admins', element: <AdminsPage /> },
       { path: 'cameras', element: <CamerasPage /> },
       { path: 'zones', element: <ZonesPage /> },
       { path: 'rules', element: <RulesPage /> },

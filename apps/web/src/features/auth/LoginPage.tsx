@@ -6,8 +6,8 @@ import { useAuth } from './AuthContext'
 
 export function LoginPage() {
   const { user, login } = useAuth()
-  const [email, setEmail] = useState('admin@example.com')
-  const [password, setPassword] = useState('Admin12345!')
+  const [email, setEmail] = useState('')
+  const [password, setPassword] = useState('')
   const [error, setError] = useState('')
   const [isSubmitting, setIsSubmitting] = useState(false)
 
@@ -39,8 +39,8 @@ export function LoginPage() {
         <p className="eyebrow">Detection AI</p>
         <h1>Workspace Monitoring Control Center</h1>
         <p className="login-copy">
-          Start with the V1 control surface for sites, cameras, zones, rules,
-          and alerts.
+          Sign in with an administrator account to manage sites, cameras,
+          zones, rules, people, and alerts.
         </p>
 
         <form className="stack" onSubmit={handleSubmit}>
@@ -50,6 +50,7 @@ export function LoginPage() {
               type="email"
               value={email}
               onChange={(event) => setEmail(event.target.value)}
+              placeholder="admin@your-company.com"
             />
           </label>
 
@@ -59,6 +60,7 @@ export function LoginPage() {
               type="password"
               value={password}
               onChange={(event) => setPassword(event.target.value)}
+              placeholder="Enter your password"
             />
           </label>
 
@@ -68,11 +70,6 @@ export function LoginPage() {
             {isSubmitting ? 'Signing in...' : 'Sign in'}
           </button>
         </form>
-
-        <div className="login-hint">
-          <strong>Local default admin</strong>
-          <span>`admin@example.com` / `Admin12345!`</span>
-        </div>
       </section>
     </div>
   )

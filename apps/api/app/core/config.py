@@ -11,9 +11,9 @@ class Settings(BaseSettings):
     access_token_expire_minutes: int = 480
     database_url: str = "sqlite:///./detection_ai.db"
     cors_origins: str = "http://localhost:5173"
-    bootstrap_admin_email: str = "admin@example.com"
-    bootstrap_admin_password: str = "Admin12345!"
-    bootstrap_admin_full_name: str = "System Admin"
+    bootstrap_admin_email: str = ""
+    bootstrap_admin_password: str = ""
+    bootstrap_admin_full_name: str = ""
     internal_api_token: str = "internal-local-token"
     alert_dedup_seconds: int = 20
 
