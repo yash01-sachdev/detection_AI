@@ -204,7 +204,7 @@ def _classify_pose(detection: Detection, pose_match: PoseDetection | None) -> st
 def _is_head_down(detection: Detection, pose_match: PoseDetection) -> bool:
     width = detection.bbox.x2 - detection.bbox.x1
     height = detection.bbox.y2 - detection.bbox.y1
-    if width <= 0 or height <= 0 or width >= height * 1.1:
+    if width <= 0 or height <= 0:
         return False
 
     head_point = _head_point(pose_match)
@@ -216,7 +216,12 @@ def _is_head_down(detection: Detection, pose_match: PoseDetection) -> bool:
     torso_height = (hip_mid[1] - shoulder_mid[1]) if hip_mid is not None else (height * 0.35)
     torso_height = max(torso_height, height * 0.18)
 
-    return head_point[1] >= shoulder_mid[1] - (torso_height * 0.05)
+    shoulder_drop_limit = shoulder_mid[1] - (torso_height * 0.22)
+    head_lowered = head_point[1] >= shoulder_drop_limit
+    head_is_low_in_box = head_point[1] >= detection.bbox.y1 + (height * 0.30)
+    shoulders_are_level = _shoulders_are_level(pose_match, torso_height)
+
+    return head_lowered and head_is_low_in_box and shoulders_are_level
 
 
 def _head_point(pose_match: PoseDetection) -> tuple[float, float] | None:
@@ -242,6 +247,14 @@ def _average_keypoint(
         sum(point.x for point in visible) / len(visible),
         sum(point.y for point in visible) / len(visible),
     )
+
+
+def _shoulders_are_level(pose_match: PoseDetection, torso_height: float) -> bool:
+    left = pose_match.keypoints.get("left_shoulder")
+    right = pose_match.keypoints.get("right_shoulder")
+    if left is None or right is None:
+        return False
+    return abs(left.y - right.y) <= max(torso_height * 0.20, 14.0)
 
 
 def _apply_pose_posture(

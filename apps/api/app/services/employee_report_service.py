@@ -25,6 +25,7 @@ MAX_REPORT_DAYS = 90
 MAX_TIMELINE_ITEMS = 40
 DEFAULT_SHIFT_DAYS = ["mon", "tue", "wed", "thu", "fri"]
 WEEKDAY_KEYS = ("mon", "tue", "wed", "thu", "fri", "sat", "sun")
+MIN_REPORTABLE_INACTIVITY_SECONDS = 600
 
 
 @dataclass
@@ -43,6 +44,16 @@ class ShiftSchedule:
     start_time: time
     end_time: time
     crosses_midnight: bool
+
+
+@dataclass(frozen=True)
+class AlertBackedEventWindow:
+    event_id: str | None
+    subject_key: str
+    zone_id: str
+    posture: str | None
+    start: datetime
+    end: datetime
 
 
 def build_employee_report(db: Session, employee_id: str, days: int) -> EmployeeReportRead:
@@ -112,8 +123,8 @@ def build_employee_report_at(
             violation_count=sum(1 for alert in alerts if _is_violation_alert(alert)),
             zone_visit_count=sum(zone.visit_count for zone in zone_visits),
             days_observed=sum(1 for day in day_summaries if day.sighting_count > 0),
-            inactivity_event_count=sum(1 for event in events if _event_is_inactive(event)),
-            longest_inactivity_seconds=max((_event_inactive_seconds(event) for event in events), default=0),
+            inactivity_event_count=sum(1 for event in events if _event_is_reportable_inactive(event)),
+            longest_inactivity_seconds=max((_event_inactive_seconds(event) for event in events if _event_is_reportable_inactive(event)), default=0),
         ),
         attendance_totals=attendance_totals,
         zone_visits=zone_visits,
@@ -252,7 +263,7 @@ def _build_day_summaries(
                 sighting_count=len(day_events),
                 alert_count=len(day_alerts),
                 violation_count=sum(1 for alert in day_alerts if _is_violation_alert(alert)),
-                inactivity_event_count=sum(1 for event in day_events if _event_is_inactive(event)),
+                inactivity_event_count=sum(1 for event in day_events if _event_is_reportable_inactive(event)),
                 top_zones=zone_visits[:3],
             )
         )
@@ -395,11 +406,14 @@ def _build_recent_timeline(
     timezone: ZoneInfo,
 ) -> list[EmployeeTimelineItem]:
     timeline_items: list[EmployeeTimelineItem] = []
+    alert_windows = _build_alert_backed_event_windows(alerts)
 
     for alert in alerts:
         details = dict(alert.details or {})
         posture = _normalize_posture(details.get("posture"))
         inactive_seconds = _coerce_int(details.get("inactive_seconds"))
+        if posture == "inactive" and inactive_seconds < MIN_REPORTABLE_INACTIVITY_SECONDS:
+            continue
         timeline_items.append(
             EmployeeTimelineItem(
                 item_type="alert",
@@ -421,11 +435,15 @@ def _build_recent_timeline(
         )
 
     for event in events:
+        if _event_is_represented_by_alert(event, alert_windows):
+            continue
         details = dict(event.details or {})
         subject = str(details.get("employee_code") or details.get("identity") or event.label).strip()
         zone_name = str(details.get("zone_name") or "").strip()
         posture = _normalize_posture(details.get("posture"))
         inactive_seconds = _coerce_int(details.get("inactive_seconds"))
+        if posture == "inactive" and inactive_seconds < MIN_REPORTABLE_INACTIVITY_SECONDS:
+            continue
         timeline_items.append(
             EmployeeTimelineItem(
                 item_type="event",
@@ -487,9 +505,81 @@ def _event_is_inactive(event: Event) -> bool:
     return _normalize_posture(details.get("posture")) == "inactive"
 
 
+def _event_is_reportable_inactive(event: Event) -> bool:
+    return _event_is_inactive(event) and _event_inactive_seconds(event) >= MIN_REPORTABLE_INACTIVITY_SECONDS
+
+
 def _event_inactive_seconds(event: Event) -> int:
     details = dict(event.details or {})
     return _coerce_int(details.get("inactive_seconds"))
+
+
+def _build_alert_backed_event_windows(alerts: list[Alert]) -> list[AlertBackedEventWindow]:
+    windows: list[AlertBackedEventWindow] = []
+    for alert in alerts:
+        details = dict(alert.details or {})
+        start = _parse_datetime(details.get("first_seen_at")) or alert.occurred_at
+        end = _parse_datetime(details.get("last_seen_at")) or alert.occurred_at
+        windows.append(
+            AlertBackedEventWindow(
+                event_id=alert.event_id,
+                subject_key=str(details.get("subject_key") or "").strip(),
+                zone_id=str(details.get("zone_id") or "").strip(),
+                posture=_normalize_posture(details.get("posture")),
+                start=min(start, end),
+                end=max(start, end),
+            )
+        )
+    return windows
+
+
+def _event_is_represented_by_alert(event: Event, alert_windows: list[AlertBackedEventWindow]) -> bool:
+    details = dict(event.details or {})
+    subject_key = _event_subject_key(event, details)
+    zone_id = str(details.get("zone_id") or event.zone_id or "").strip()
+    posture = _normalize_posture(details.get("posture"))
+    occurred_at = event.occurred_at if event.occurred_at.tzinfo is not None else event.occurred_at.replace(tzinfo=UTC)
+
+    for window in alert_windows:
+        if window.event_id == event.id:
+            return True
+        if window.subject_key and window.subject_key != subject_key:
+            continue
+        if window.zone_id and window.zone_id != zone_id:
+            continue
+        if window.posture != posture:
+            continue
+        if window.start <= occurred_at <= window.end:
+            return True
+
+    return False
+
+
+def _event_subject_key(event: Event, details: dict[str, object]) -> str:
+    employee_id = str(details.get("employee_id") or "").strip()
+    if employee_id:
+        return f"employee:{employee_id}"
+
+    track_id = str(details.get("track_id") or event.track_id or "").strip()
+    if track_id:
+        return f"track:{track_id}"
+
+    identity = str(details.get("identity") or "").strip()
+    if identity:
+        return f"identity:{identity.lower()}"
+
+    return f"label:{str(event.label or '').strip().lower()}"
+
+
+def _parse_datetime(value: object) -> datetime | None:
+    text = str(value or "").strip()
+    if not text:
+        return None
+    try:
+        parsed = datetime.fromisoformat(text)
+    except ValueError:
+        return None
+    return parsed if parsed.tzinfo is not None else parsed.replace(tzinfo=UTC)
 
 
 def _build_event_title(subject: str, posture: str | None) -> str:

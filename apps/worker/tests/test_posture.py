@@ -133,6 +133,45 @@ class PostureAnalyzerTests(unittest.TestCase):
         self.assertEqual(active.posture, "head_down")
         self.assertEqual(active.details["posture_source"], "pose_model")
 
+    def test_marks_head_down_for_wider_seated_desk_box(self) -> None:
+        clock = FakeClock()
+        pose_estimator = FakePoseEstimator()
+        analyzer = PostureAnalyzer(
+            pose_estimator=pose_estimator,
+            head_down_threshold_seconds=4,
+            inactivity_threshold_seconds=600,
+            movement_threshold_px=18,
+            clock=clock.now,
+        )
+
+        detection = Detection(
+            label="person",
+            entity_type="employee",
+            confidence=0.95,
+            bbox=BoundingBox(x1=60, y1=60, x2=340, y2=290),
+            track_id="wide-desk-track",
+            details={"zone_type": "desk", "zone_name": "Desk Wide"},
+        )
+        pose_estimator.pose_detections = [
+            _build_pose_detection(
+                bbox=BoundingBox(x1=62, y1=62, x2=338, y2=288),
+                keypoints={
+                    "nose": (198, 152),
+                    "left_shoulder": (145, 150),
+                    "right_shoulder": (255, 151),
+                    "left_hip": (165, 230),
+                    "right_hip": (238, 231),
+                },
+            )
+        ]
+
+        clock.set(0)
+        analyzer.annotate(None, [detection])
+        clock.set(5)
+        active = analyzer.annotate(None, [detection])[0]
+
+        self.assertEqual(active.posture, "head_down")
+
 
 def _build_pose_detection(
     *,

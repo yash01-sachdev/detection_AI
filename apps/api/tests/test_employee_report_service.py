@@ -260,7 +260,7 @@ class EmployeeReportServiceTests(unittest.TestCase):
                         "employee_id": employee.id,
                         "employee_code": employee.employee_code,
                         "posture": "inactive",
-                        "inactive_seconds": 45,
+                        "inactive_seconds": 620,
                         "source": "unit-test",
                     },
                 ),
@@ -274,10 +274,10 @@ class EmployeeReportServiceTests(unittest.TestCase):
 
         self.assertIsNone(response.alert_id)
         self.assertEqual(report.totals.inactivity_event_count, 1)
-        self.assertEqual(report.totals.longest_inactivity_seconds, 45)
+        self.assertEqual(report.totals.longest_inactivity_seconds, 620)
         self.assertEqual(report.daily_summaries[0].inactivity_event_count, 1)
         self.assertEqual(report.recent_timeline[0].title, "EMP-888 marked inactive")
-        self.assertEqual(report.recent_timeline[0].inactive_seconds, 45)
+        self.assertEqual(report.recent_timeline[0].inactive_seconds, 620)
         self.assertEqual(report.recent_timeline[0].posture, "inactive")
 
     def test_build_employee_report_describes_pose_posture_events(self) -> None:
@@ -335,7 +335,7 @@ class EmployeeReportServiceTests(unittest.TestCase):
             db.refresh(desk_zone)
             db.refresh(employee)
 
-            ingest_detection_event(
+            first_response = ingest_detection_event(
                 db,
                 DetectionIngestRequest(
                     site_id=site.id,
@@ -354,6 +354,25 @@ class EmployeeReportServiceTests(unittest.TestCase):
                     },
                 ),
             )
+            second_response = ingest_detection_event(
+                db,
+                DetectionIngestRequest(
+                    site_id=site.id,
+                    camera_id=camera.id,
+                    zone_id=desk_zone.id,
+                    entity_type=EntityType.employee,
+                    label="Pose Tester",
+                    track_id="t-head-1",
+                    confidence=0.91,
+                    occurred_at=posture_time + timedelta(seconds=8),
+                    details={
+                        "employee_id": employee.id,
+                        "employee_code": employee.employee_code,
+                        "posture": "head_down",
+                        "source": "unit-test",
+                    },
+                ),
+            )
 
             report = build_employee_report_at(
                 db,
@@ -362,8 +381,11 @@ class EmployeeReportServiceTests(unittest.TestCase):
                 reference_time=reference_time,
             )
 
-        self.assertTrue(any(item.posture == "head_down" for item in report.recent_timeline))
-        self.assertTrue(any("Head-down posture detected" in item.description for item in report.recent_timeline))
+        self.assertEqual(first_response.alert_id, second_response.alert_id)
+        head_down_items = [item for item in report.recent_timeline if item.posture == "head_down"]
+        self.assertEqual(len(head_down_items), 1)
+        self.assertEqual(head_down_items[0].item_type, "alert")
+        self.assertIn("Head-down posture detected", head_down_items[0].description)
 
     def test_build_employee_report_marks_late_and_off_day_activity(self) -> None:
         reference_time = datetime(2026, 4, 6, 18, 0, tzinfo=UTC)

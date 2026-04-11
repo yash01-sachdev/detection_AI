@@ -207,7 +207,7 @@ class MonitoringServiceTests(unittest.TestCase):
         self.assertEqual(employee_alert_title, "Employee In Smoking Area")
         self.assertIsNone(person_response.alert_id)
 
-    def test_office_desk_inactivity_records_event_without_creating_alert(self) -> None:
+    def test_office_desk_inactivity_under_threshold_is_suppressed(self) -> None:
         site, camera, zone = self._create_site_camera_zone(
             site_type=SiteType.office,
             zone_type=ZoneType.desk,
@@ -240,8 +240,46 @@ class MonitoringServiceTests(unittest.TestCase):
             alerts = list(db.scalars(select(Alert).where(Alert.site_id == site.id)))
 
         self.assertIsNotNone(event)
+        self.assertNotIn("posture", event.details)
+        self.assertNotIn("inactive_seconds", event.details)
+        self.assertIsNone(response.alert_id)
+        self.assertEqual(len(alerts), 0)
+
+    def test_office_desk_inactivity_over_threshold_records_event_without_creating_alert(self) -> None:
+        site, camera, zone = self._create_site_camera_zone(
+            site_type=SiteType.office,
+            zone_type=ZoneType.desk,
+            zone_name="Desk Row A",
+            is_restricted=False,
+        )
+
+        with self.SessionLocal() as db:
+            response = ingest_detection_event(
+                db,
+                DetectionIngestRequest(
+                    site_id=site.id,
+                    camera_id=camera.id,
+                    zone_id=zone.id,
+                    entity_type=EntityType.employee,
+                    label="Live Verify",
+                    track_id="t-desk-2",
+                    confidence=0.91,
+                    occurred_at=datetime.now(UTC),
+                    details={
+                        "employee_id": "employee-11",
+                        "employee_code": "EMP-011",
+                        "posture": "inactive",
+                        "inactive_seconds": 620,
+                        "source": "unit-test",
+                    },
+                ),
+            )
+            event = db.get(Event, response.event_id)
+            alerts = list(db.scalars(select(Alert).where(Alert.site_id == site.id)))
+
+        self.assertIsNotNone(event)
         self.assertEqual(event.details["posture"], "inactive")
-        self.assertEqual(event.details["inactive_seconds"], 28)
+        self.assertEqual(event.details["inactive_seconds"], 620)
         self.assertIsNone(response.alert_id)
         self.assertEqual(len(alerts), 0)
 

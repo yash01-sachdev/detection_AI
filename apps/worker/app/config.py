@@ -24,8 +24,8 @@ class Settings(BaseSettings):
     enable_pose_posture: bool = True
     pose_model: str = "yolov8n-pose.pt"
     pose_confidence_threshold: float = 0.5
-    head_down_threshold_seconds: int = 8
-    inactivity_threshold_seconds: int = 20
+    head_down_threshold_seconds: int = 6
+    inactivity_threshold_seconds: int = 600
     inactivity_movement_threshold_px: float = 24.0
 
     model_config = SettingsConfigDict(

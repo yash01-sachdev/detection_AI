@@ -99,6 +99,8 @@ MODE_RULES: dict[SiteType, dict[str, object]] = {
     },
 }
 
+MIN_ALERTABLE_INACTIVITY_SECONDS = 600
+
 
 def list_mode_templates() -> list[ModeTemplate]:
     templates: list[ModeTemplate] = []
@@ -179,6 +181,7 @@ def ingest_detection_event(db: Session, payload: DetectionIngestRequest) -> Dete
     occurred_at = payload.occurred_at or datetime.now(UTC)
     zone = db.get(Zone, payload.zone_id) if payload.zone_id else None
     details = dict(payload.details)
+    _suppress_short_inactivity(details)
     details.setdefault("track_id", payload.track_id)
     details.setdefault("entity_type", _normalize_value(payload.entity_type))
     details.setdefault("zone_id", payload.zone_id)
@@ -249,6 +252,20 @@ def ingest_detection_event(db: Session, payload: DetectionIngestRequest) -> Dete
 
     db.commit()
     return DetectionIngestResponse(event_id=event.id, alert_id=alert_id)
+
+
+def _suppress_short_inactivity(details: dict[str, object]) -> None:
+    posture = str(details.get("posture") or "").strip().lower()
+    if posture != "inactive":
+        return
+
+    inactive_seconds = _coerce_int(details.get("inactive_seconds"))
+    if inactive_seconds >= MIN_ALERTABLE_INACTIVITY_SECONDS:
+        details["inactive_seconds"] = inactive_seconds
+        return
+
+    for key in ("posture", "inactive_seconds", "posture_source", "posture_hold_seconds", "pose_confidence"):
+        details.pop(key, None)
 
 
 def _find_matching_rule(
@@ -443,6 +460,13 @@ def _normalize_value(value: object) -> object:
     if hasattr(value, "value"):
         return getattr(value, "value")
     return value
+
+
+def _coerce_int(value: object) -> int:
+    try:
+        return max(int(value or 0), 0)
+    except (TypeError, ValueError):
+        return 0
 
 
 def _build_alert_subject_key(payload: DetectionIngestRequest, details: dict[str, object]) -> str:
