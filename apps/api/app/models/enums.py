@@ -32,6 +32,7 @@ class ZoneType(str, Enum):
 class EntityType(str, Enum):
     person = "person"
     employee = "employee"
+    known_person = "known_person"
     dog = "dog"
     vehicle = "vehicle"
     unknown = "unknown"
@@ -48,4 +49,3 @@ class AlertStatus(str, Enum):
     open = "open"
     acknowledged = "acknowledged"
     resolved = "resolved"
-

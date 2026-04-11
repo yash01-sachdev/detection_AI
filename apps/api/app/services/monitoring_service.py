@@ -492,6 +492,10 @@ def _build_alert_subject_key(payload: DetectionIngestRequest, details: dict[str,
     if employee_id:
         return f"employee:{employee_id}"
 
+    known_person_id = str(details.get("known_person_id") or "").strip()
+    if known_person_id:
+        return f"known_person:{known_person_id}"
+
     track_id = str(payload.track_id or "").strip()
     if track_id:
         return f"track:{track_id}"
@@ -507,6 +511,10 @@ def _build_alert_subject_key_from_details(details: dict[str, object]) -> str:
     employee_id = str(details.get("employee_id") or "").strip()
     if employee_id:
         return f"employee:{employee_id}"
+
+    known_person_id = str(details.get("known_person_id") or "").strip()
+    if known_person_id:
+        return f"known_person:{known_person_id}"
 
     track_id = str(details.get("track_id") or "").strip()
     if track_id:

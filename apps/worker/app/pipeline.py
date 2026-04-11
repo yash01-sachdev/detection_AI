@@ -495,26 +495,30 @@ class MonitoringPipeline:
 
             memory = self.track_identity_memory.get(detection.track_id)
             employee_id = str(detection.details.get("employee_id", "")).strip()
-            if detection.entity_type == "employee" and (employee_id or detection.identity):
+            known_person_id = str(detection.details.get("known_person_id", "")).strip()
+            if detection.entity_type in {"employee", "known_person"} and ((employee_id or known_person_id) or detection.identity):
                 self.track_identity_memory[detection.track_id] = {
+                    "entity_type": detection.entity_type,
                     "identity": detection.identity,
                     "employee_id": detection.details.get("employee_id"),
                     "employee_code": detection.details.get("employee_code"),
                     "role_title": detection.details.get("role_title"),
+                    "known_person_id": detection.details.get("known_person_id"),
+                    "known_person_name": detection.details.get("known_person_name"),
                 }
                 stabilized.append(detection)
                 continue
 
             if detection.entity_type == "person" and memory:
                 updated_details = {**detection.details}
-                for key in ("employee_id", "employee_code", "role_title"):
+                for key in ("employee_id", "employee_code", "role_title", "known_person_id", "known_person_name"):
                     value = memory.get(key)
                     if value:
                         updated_details[key] = value
                 stabilized.append(
                     detection.model_copy(
                         update={
-                            "entity_type": "employee",
+                            "entity_type": str(memory.get("entity_type") or "person"),
                             "identity": str(memory.get("identity") or detection.identity or "").strip() or detection.identity,
                             "details": updated_details,
                         }
@@ -770,6 +774,9 @@ def _build_entity_key(detection: Detection) -> str:
     employee_id = str(detection.details.get("employee_id", "")).strip()
     if employee_id:
         return f"employee:{employee_id}"
+    known_person_id = str(detection.details.get("known_person_id", "")).strip()
+    if known_person_id:
+        return f"known_person:{known_person_id}"
     if detection.identity:
         return f"identity:{detection.identity.lower()}"
     return detection.entity_type

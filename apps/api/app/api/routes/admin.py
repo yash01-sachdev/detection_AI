@@ -9,6 +9,7 @@ from app.api.deps import get_db, require_admin
 from app.models.alert import Alert
 from app.models.camera import Camera
 from app.models.employee import Employee, EmployeeFaceProfile
+from app.models.known_person import KnownPerson, KnownPersonFaceProfile
 from app.models.rule import Rule
 from app.models.site import Site
 from app.models.zone import Zone
@@ -21,6 +22,9 @@ from app.schemas.monitoring import (
     EmployeeFaceProfileRead,
     EmployeeReportRead,
     EmployeeRead,
+    KnownPersonCreate,
+    KnownPersonFaceProfileRead,
+    KnownPersonRead,
     LiveMonitorStatus,
     ModeTemplate,
     RuleCreate,
@@ -31,6 +35,12 @@ from app.schemas.monitoring import (
     WorkerAssignmentUpdate,
     ZoneCreate,
     ZoneRead,
+)
+from app.services.known_person_service import (
+    add_known_person_face_profile,
+    create_known_person,
+    delete_known_person,
+    list_known_people,
 )
 from app.services.employee_report_service import build_employee_report
 from app.services.employee_service import (
@@ -145,6 +155,47 @@ async def upload_employee_face_profile(
     _: object = Depends(require_admin),
 ) -> EmployeeFaceProfile:
     return await add_employee_face_profile(db, employee_id, file)
+
+
+@router.get("/known-people", response_model=list[KnownPersonRead])
+def get_known_people(
+    site_id: str | None = None,
+    db: Session = Depends(get_db),
+    _: object = Depends(require_admin),
+) -> list[KnownPerson]:
+    return list_known_people(db, site_id=site_id)
+
+
+@router.post("/known-people", response_model=KnownPersonRead, status_code=status.HTTP_201_CREATED)
+def post_known_person(
+    payload: KnownPersonCreate,
+    db: Session = Depends(get_db),
+    _: object = Depends(require_admin),
+) -> KnownPerson:
+    return create_known_person(db, payload)
+
+
+@router.delete("/known-people/{known_person_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_known_person_route(
+    known_person_id: str,
+    db: Session = Depends(get_db),
+    _: object = Depends(require_admin),
+) -> None:
+    delete_known_person(db, known_person_id)
+
+
+@router.post(
+    "/known-people/{known_person_id}/face-profiles",
+    response_model=KnownPersonFaceProfileRead,
+    status_code=status.HTTP_201_CREATED,
+)
+async def upload_known_person_face_profile(
+    known_person_id: str,
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+    _: object = Depends(require_admin),
+) -> KnownPersonFaceProfile:
+    return await add_known_person_face_profile(db, known_person_id, file)
 
 
 @router.get("/zones", response_model=list[ZoneRead])

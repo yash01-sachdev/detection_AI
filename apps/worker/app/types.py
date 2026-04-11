@@ -41,6 +41,21 @@ class EmployeeDefinition(BaseModel):
     face_profiles: list[EmployeeFaceProfileDefinition] = Field(default_factory=list)
 
 
+class KnownPersonFaceProfileDefinition(BaseModel):
+    id: str
+    known_person_id: str
+    source_image_path: str
+
+
+class KnownPersonDefinition(BaseModel):
+    id: str
+    site_id: str
+    display_name: str
+    notes: str = ""
+    is_active: bool
+    face_profiles: list[KnownPersonFaceProfileDefinition] = Field(default_factory=list)
+
+
 class WorkerAssignmentDefinition(BaseModel):
     worker_name: str
     site_id: str | None = None

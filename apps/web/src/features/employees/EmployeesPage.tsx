@@ -13,6 +13,8 @@ import type {
   EmployeeReport,
   EmployeeTimelineItem,
   EmployeeZoneVisitStat,
+  KnownPerson,
+  KnownPersonFaceProfile,
 } from '../../types/models'
 import { useSiteContext } from '../sites/SiteContext'
 
@@ -38,6 +40,12 @@ const initialEmployeeForm = {
   shift_end_time: '17:00',
   shift_grace_minutes: 10,
   shift_days: ['mon', 'tue', 'wed', 'thu', 'fri'],
+  is_active: true,
+}
+
+const initialKnownPersonForm = {
+  display_name: '',
+  notes: '',
   is_active: true,
 }
 
@@ -183,6 +191,22 @@ function renderAttendanceDay(day: EmployeeAttendanceDay) {
 }
 
 export function EmployeesPage() {
+  const { selectedSite, selectedSiteId } = useSiteContext()
+
+  if (selectedSite?.site_type === 'home') {
+    return <HomeKnownPeoplePage selectedSiteId={selectedSiteId} selectedSiteName={selectedSite.name} />
+  }
+
+  return <StaffEmployeesPage selectedSite={selectedSite} selectedSiteId={selectedSiteId} />
+}
+
+function StaffEmployeesPage({
+  selectedSite,
+  selectedSiteId,
+}: {
+  selectedSite: { name: string } | null
+  selectedSiteId: string
+}) {
   const [employees, setEmployees] = useState<Employee[]>([])
   const [employeeForm, setEmployeeForm] = useState(initialEmployeeForm)
   const [selectedEmployeeId, setSelectedEmployeeId] = useState('')
@@ -192,8 +216,6 @@ export function EmployeesPage() {
   const [report, setReport] = useState<EmployeeReport | null>(null)
   const [error, setError] = useState('')
   const [uploadMessage, setUploadMessage] = useState('')
-  const { selectedSite, selectedSiteId } = useSiteContext()
-
   useEffect(() => {
     if (!selectedSiteId) {
       setEmployees([])
@@ -768,6 +790,236 @@ export function EmployeesPage() {
           </div>
         ) : (
           <EmptyState message="Choose an employee to view the report." />
+        )}
+      </Panel>
+    </div>
+  )
+}
+
+function HomeKnownPeoplePage({
+  selectedSiteId,
+  selectedSiteName,
+}: {
+  selectedSiteId: string
+  selectedSiteName: string
+}) {
+  const [knownPeople, setKnownPeople] = useState<KnownPerson[]>([])
+  const [form, setForm] = useState(initialKnownPersonForm)
+  const [uploadKnownPersonId, setUploadKnownPersonId] = useState('')
+  const [selectedFile, setSelectedFile] = useState<File | null>(null)
+  const [error, setError] = useState('')
+  const [uploadMessage, setUploadMessage] = useState('')
+
+  useEffect(() => {
+    if (!selectedSiteId) {
+      setKnownPeople([])
+      setUploadKnownPersonId('')
+      return
+    }
+
+    apiRequest<KnownPerson[]>(withSiteId('/known-people', selectedSiteId))
+      .then((loadedPeople) => {
+        setKnownPeople(loadedPeople)
+        setUploadKnownPersonId(loadedPeople[0]?.id ?? '')
+        setError('')
+      })
+      .catch((loadError) => {
+        setError(loadError instanceof Error ? loadError.message : 'Unable to load known people.')
+      })
+  }, [selectedSiteId])
+
+  const knownPeopleOptions = useMemo(
+    () =>
+      knownPeople.map((person) => ({
+        id: person.id,
+        label: person.display_name,
+      })),
+    [knownPeople],
+  )
+
+  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    setError('')
+
+    if (!selectedSiteId) {
+      setError('Choose a site in the header first.')
+      return
+    }
+
+    try {
+      const createdPerson = await apiRequest<KnownPerson>('/known-people', {
+        method: 'POST',
+        body: JSON.stringify({
+          ...form,
+          site_id: selectedSiteId,
+        }),
+      })
+      setKnownPeople((current) => [createdPerson, ...current])
+      setUploadKnownPersonId(createdPerson.id)
+      setForm(initialKnownPersonForm)
+    } catch (submissionError) {
+      setError(submissionError instanceof Error ? submissionError.message : 'Unable to create known person.')
+    }
+  }
+
+  async function handleFaceUpload(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    setError('')
+    setUploadMessage('')
+
+    if (!uploadKnownPersonId || !selectedFile) {
+      setError('Choose a known person and a face image first.')
+      return
+    }
+
+    const formData = new FormData()
+    formData.append('file', selectedFile)
+
+    try {
+      const createdProfile = await apiRequest<KnownPersonFaceProfile>(`/known-people/${uploadKnownPersonId}/face-profiles`, {
+        method: 'POST',
+        body: formData,
+      })
+
+      setKnownPeople((current) =>
+        current.map((person) =>
+          person.id === uploadKnownPersonId
+            ? { ...person, face_profiles: [createdProfile, ...person.face_profiles] }
+            : person,
+        ),
+      )
+      setSelectedFile(null)
+      setUploadMessage('Face profile uploaded successfully.')
+    } catch (uploadError) {
+      setError(uploadError instanceof Error ? uploadError.message : 'Unable to upload face image.')
+    }
+  }
+
+  async function handleDeleteKnownPerson(knownPersonId: string) {
+    const knownPerson = knownPeople.find((item) => item.id === knownPersonId)
+    if (!knownPerson) {
+      return
+    }
+
+    const shouldDelete = window.confirm(`Delete ${knownPerson.display_name}? This will also remove uploaded face images.`)
+    if (!shouldDelete) {
+      return
+    }
+
+    setError('')
+    setUploadMessage('')
+
+    try {
+      await apiRequest<void>(`/known-people/${knownPersonId}`, { method: 'DELETE' })
+      const remaining = knownPeople.filter((item) => item.id !== knownPersonId)
+      setKnownPeople(remaining)
+      if (uploadKnownPersonId === knownPersonId) {
+        setUploadKnownPersonId(remaining[0]?.id ?? '')
+      }
+    } catch (deleteError) {
+      setError(deleteError instanceof Error ? deleteError.message : 'Unable to delete known person.')
+    }
+  }
+
+  return (
+    <div className="page-grid page-grid--two-up">
+      <Panel
+        title="Create Known Person"
+        subtitle={`Add family members or trusted people for ${selectedSiteName}. These profiles are for recognition only, not reports.`}
+      >
+        <form className="stack" onSubmit={handleSubmit}>
+          <label className="field">
+            <span>Name</span>
+            <input
+              value={form.display_name}
+              onChange={(event) =>
+                setForm((current) => ({ ...current, display_name: event.target.value }))
+              }
+            />
+          </label>
+          <label className="field">
+            <span>Notes</span>
+            <textarea
+              rows={3}
+              value={form.notes}
+              onChange={(event) =>
+                setForm((current) => ({ ...current, notes: event.target.value }))
+              }
+              placeholder="Optional. Family member, regular visitor, caretaker..."
+            />
+          </label>
+          {error ? <p className="form-error">{error}</p> : null}
+          <button className="primary-button" disabled={!selectedSiteId} type="submit">
+            Create known person
+          </button>
+        </form>
+
+        <form className="stack upload-panel" onSubmit={handleFaceUpload}>
+          <div className="panel__header">
+            <h3>Enroll Face</h3>
+            <p>Use a front-facing image with one clear face.</p>
+          </div>
+          <label className="field">
+            <span>Known person</span>
+            <select value={uploadKnownPersonId} onChange={(event) => setUploadKnownPersonId(event.target.value)}>
+              <option value="">Select known person</option>
+              {knownPeopleOptions.map((person) => (
+                <option key={person.id} value={person.id}>
+                  {person.label}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="field">
+            <span>Face image</span>
+            <input type="file" accept="image/*" onChange={(event) => setSelectedFile(event.target.files?.[0] ?? null)} />
+          </label>
+          {uploadKnownPersonId ? (
+            <p className="form-success">
+              Upload target:{' '}
+              {knownPeopleOptions.find((person) => person.id === uploadKnownPersonId)?.label ?? 'Selected person'}
+            </p>
+          ) : null}
+          {uploadMessage ? <p className="form-success">{uploadMessage}</p> : null}
+          <button className="ghost-button" disabled={!knownPeopleOptions.length || !uploadKnownPersonId || !selectedFile} type="submit">
+            Upload face image
+          </button>
+        </form>
+      </Panel>
+
+      <Panel
+        title="Known People"
+        subtitle="Recognized people here will be treated as trusted home profiles instead of unknown visitors."
+      >
+        {knownPeople.length ? (
+          <div className="list">
+            {knownPeople.map((person) => (
+              <article key={person.id} className="list-row list-row--top employee-card">
+                <div>
+                  <strong>{person.display_name}</strong>
+                  <p>{person.notes || 'No notes yet.'}</p>
+                  <small>{person.face_profiles.length} face profile(s)</small>
+                </div>
+                <div className="stack-sm align-end">
+                  <div className="employee-face-strip">
+                    {person.face_profiles.slice(0, 3).map((profile) => (
+                      <img
+                        key={profile.id}
+                        className="employee-face-thumb"
+                        src={`${API_ROOT}${profile.source_image_path}`}
+                        alt={person.display_name}
+                      />
+                    ))}
+                  </div>
+                  <button className="ghost-button" type="button" onClick={() => handleDeleteKnownPerson(person.id)}>
+                    Delete person
+                  </button>
+                </div>
+              </article>
+            ))}
+          </div>
+        ) : (
+          <EmptyState message="No known people yet for this home site. Add one and upload a face image to begin recognition." />
         )}
       </Panel>
     </div>

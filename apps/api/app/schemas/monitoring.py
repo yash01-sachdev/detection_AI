@@ -118,6 +118,32 @@ class EmployeeRead(EmployeeShiftFields):
     model_config = {"from_attributes": True}
 
 
+class KnownPersonFaceProfileRead(BaseModel):
+    id: str
+    known_person_id: str
+    source_image_path: str
+
+    model_config = {"from_attributes": True}
+
+
+class KnownPersonCreate(BaseModel):
+    site_id: str
+    display_name: str = Field(min_length=1, max_length=150)
+    notes: str = Field(default="", max_length=255)
+    is_active: bool = True
+
+
+class KnownPersonRead(BaseModel):
+    id: str
+    site_id: str
+    display_name: str
+    notes: str
+    is_active: bool
+    face_profiles: list[KnownPersonFaceProfileRead] = Field(default_factory=list)
+
+    model_config = {"from_attributes": True}
+
+
 class EmployeeReportSubject(EmployeeShiftFields):
     id: str
     employee_code: str

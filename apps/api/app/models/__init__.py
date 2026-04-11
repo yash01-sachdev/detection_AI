@@ -2,6 +2,7 @@ from app.models.alert import Alert
 from app.models.camera import Camera
 from app.models.employee import Employee, EmployeeFaceProfile
 from app.models.event import Event
+from app.models.known_person import KnownPerson, KnownPersonFaceProfile
 from app.models.rule import Rule
 from app.models.site import Site
 from app.models.user import User
@@ -14,6 +15,8 @@ __all__ = [
     "Employee",
     "EmployeeFaceProfile",
     "Event",
+    "KnownPerson",
+    "KnownPersonFaceProfile",
     "Rule",
     "Site",
     "User",

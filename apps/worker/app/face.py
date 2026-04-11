@@ -8,7 +8,7 @@ import httpx
 
 from app.client import ApiClient
 from app.config import Settings
-from app.types import BoundingBox, Detection, EmployeeDefinition
+from app.types import BoundingBox, Detection, EmployeeDefinition, KnownPersonDefinition
 
 logger = logging.getLogger(__name__)
 
@@ -20,9 +20,10 @@ MODEL_URLS = {
 
 @dataclass
 class KnownFace:
-    employee_id: str
-    employee_code: str
-    full_name: str
+    entity_type: str
+    subject_id: str
+    subject_code: str
+    display_name: str
     role_title: str
     embedding: object
 
@@ -30,9 +31,10 @@ class KnownFace:
 @dataclass
 class RecognizedFace:
     bbox: tuple[float, float, float, float]
-    employee_id: str
-    employee_code: str
-    full_name: str
+    entity_type: str
+    subject_id: str
+    subject_code: str
+    display_name: str
     role_title: str
     score: float
 
@@ -106,15 +108,9 @@ class EmployeeFaceRecognizer:
             annotated.append(
                 detection.model_copy(
                     update={
-                        "entity_type": "employee",
-                        "identity": match.full_name,
-                        "details": {
-                            **detection.details,
-                            "employee_id": match.employee_id,
-                            "employee_code": match.employee_code,
-                            "role_title": match.role_title,
-                            "face_match_score": round(match.score, 4),
-                        },
+                        "entity_type": match.entity_type,
+                        "identity": match.display_name,
+                        "details": _recognized_details(detection.details, match),
                     }
                 )
             )
@@ -129,13 +125,16 @@ class EmployeeFaceRecognizer:
         self.last_refresh_at = now
         try:
             employees = self.api_client.fetch_employees()
+            known_people = self.api_client.fetch_known_people()
         except Exception as exc:  # pragma: no cover
-            logger.warning("Failed to refresh employee face profiles: %s", exc)
+            logger.warning("Failed to refresh known face profiles: %s", exc)
             return
 
         known_faces: list[KnownFace] = []
         for employee in employees:
             known_faces.extend(self._build_known_faces_for_employee(employee))
+        for known_person in known_people:
+            known_faces.extend(self._build_known_faces_for_known_person(known_person))
 
         self.known_faces = known_faces
 
@@ -158,10 +157,41 @@ class EmployeeFaceRecognizer:
             embedding = self.recognizer.feature(aligned)
             known_faces.append(
                 KnownFace(
-                    employee_id=employee.id,
-                    employee_code=employee.employee_code,
-                    full_name=_employee_display_name(employee),
+                    entity_type="employee",
+                    subject_id=employee.id,
+                    subject_code=employee.employee_code,
+                    display_name=_employee_display_name(employee),
                     role_title=employee.role_title,
+                    embedding=embedding,
+                )
+            )
+
+        return known_faces
+
+    def _build_known_faces_for_known_person(self, known_person: KnownPersonDefinition) -> list[KnownFace]:
+        if self.detector is None or self.recognizer is None:
+            return []
+
+        known_faces: list[KnownFace] = []
+        for profile in known_person.face_profiles:
+            image = self._download_profile_image(profile.source_image_path)
+            if image is None:
+                continue
+
+            face = self._detect_primary_face(image)
+            if face is None:
+                logger.warning("No face found in enrollment image for known person %s.", known_person.display_name)
+                continue
+
+            aligned = self.recognizer.alignCrop(image, face)
+            embedding = self.recognizer.feature(aligned)
+            known_faces.append(
+                KnownFace(
+                    entity_type="known_person",
+                    subject_id=known_person.id,
+                    subject_code=known_person.display_name,
+                    display_name=known_person.display_name,
+                    role_title="",
                     embedding=embedding,
                 )
             )
@@ -216,9 +246,10 @@ class EmployeeFaceRecognizer:
             matches.append(
                 RecognizedFace(
                     bbox=(x, y, w, h),
-                    employee_id=best_match.employee_id,
-                    employee_code=best_match.employee_code,
-                    full_name=best_match.full_name,
+                    entity_type=best_match.entity_type,
+                    subject_id=best_match.subject_id,
+                    subject_code=best_match.subject_code,
+                    display_name=best_match.display_name,
                     role_title=best_match.role_title,
                     score=best_match.score,
                 )
@@ -260,9 +291,10 @@ def build_face_recognizer(settings: Settings, api_client: ApiClient) -> Employee
 
 @dataclass
 class MatchResult:
-    employee_id: str
-    employee_code: str
-    full_name: str
+    entity_type: str
+    subject_id: str
+    subject_code: str
+    display_name: str
     role_title: str
     score: float
 
@@ -275,9 +307,10 @@ def _best_known_face_match(embedding, known_faces: list[KnownFace], recognizer, 
             continue
         if best_result is None or score > best_result.score:
             best_result = MatchResult(
-                employee_id=known_face.employee_id,
-                employee_code=known_face.employee_code,
-                full_name=known_face.full_name,
+                entity_type=known_face.entity_type,
+                subject_id=known_face.subject_id,
+                subject_code=known_face.subject_code,
+                display_name=known_face.display_name,
                 role_title=known_face.role_title,
                 score=score,
             )
@@ -307,6 +340,35 @@ def _point_inside_bbox(point: tuple[float, float], bbox: BoundingBox) -> bool:
 def _employee_display_name(employee: EmployeeDefinition) -> str:
     full_name = f"{employee.first_name} {employee.last_name}".strip()
     return full_name or employee.employee_code
+
+
+def _recognized_details(existing_details: dict[str, object], match: RecognizedFace) -> dict[str, object]:
+    details = {
+        **existing_details,
+        "face_match_score": round(match.score, 4),
+    }
+    if match.entity_type == "employee":
+        details.update(
+            {
+                "employee_id": match.subject_id,
+                "employee_code": match.subject_code,
+                "role_title": match.role_title,
+            }
+        )
+        details.pop("known_person_id", None)
+        details.pop("known_person_name", None)
+        return details
+
+    details.update(
+        {
+            "known_person_id": match.subject_id,
+            "known_person_name": match.display_name,
+        }
+    )
+    details.pop("employee_id", None)
+    details.pop("employee_code", None)
+    details.pop("role_title", None)
+    return details
 
 
 def _looks_like_git_lfs_pointer(content: bytes) -> bool:

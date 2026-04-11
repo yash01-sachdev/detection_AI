@@ -5,7 +5,7 @@ const NAV_ITEMS = [
   { to: '/live', label: 'Live' },
   { to: '/modes', label: 'Modes' },
   { to: '/sites', label: 'Sites' },
-  { to: '/employees', label: 'Employees' },
+  { to: '/employees', label: 'People' },
   { to: '/cameras', label: 'Cameras' },
   { to: '/zones', label: 'Zones' },
   { to: '/rules', label: 'Rules' },

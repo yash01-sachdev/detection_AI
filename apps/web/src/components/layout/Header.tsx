@@ -11,7 +11,7 @@ const PAGE_TITLES: Record<string, string> = {
   '/zones': 'Zones',
   '/rules': 'Rules',
   '/alerts': 'Alerts',
-  '/employees': 'Employees',
+  '/employees': 'People',
 }
 
 export function Header() {

@@ -30,6 +30,12 @@ export type EmployeeFaceProfile = {
   source_image_path: string
 }
 
+export type KnownPersonFaceProfile = {
+  id: string
+  known_person_id: string
+  source_image_path: string
+}
+
 export type Employee = {
   id: string
   site_id: string | null
@@ -44,6 +50,15 @@ export type Employee = {
   shift_grace_minutes: number
   shift_days: string[]
   face_profiles: EmployeeFaceProfile[]
+}
+
+export type KnownPerson = {
+  id: string
+  site_id: string
+  display_name: string
+  notes: string
+  is_active: boolean
+  face_profiles: KnownPersonFaceProfile[]
 }
 
 export type EmployeeReportSubject = {

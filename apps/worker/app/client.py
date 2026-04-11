@@ -1,7 +1,13 @@
 import httpx
 
 from app.config import Settings
-from app.types import Detection, EmployeeDefinition, WorkerAssignmentDefinition, ZoneDefinition
+from app.types import (
+    Detection,
+    EmployeeDefinition,
+    KnownPersonDefinition,
+    WorkerAssignmentDefinition,
+    ZoneDefinition,
+)
 
 
 class ApiClient:
@@ -68,6 +74,20 @@ class ApiClient:
             response.raise_for_status()
 
         return [EmployeeDefinition.model_validate(item) for item in response.json()]
+
+    def fetch_known_people(self) -> list[KnownPersonDefinition]:
+        assignment = self.runtime_assignment
+        if assignment is None or not assignment.site_id:
+            return []
+
+        with httpx.Client(timeout=20.0) as client:
+            response = client.get(
+                f"{self.settings.api_base_url}/ingest/sites/{assignment.site_id}/known-people",
+                headers={"x-internal-token": self.settings.api_internal_token},
+            )
+            response.raise_for_status()
+
+        return [KnownPersonDefinition.model_validate(item) for item in response.json()]
 
     def ingest_detection(self, detection: Detection, snapshot_path: str | None = None) -> None:
         assignment = self.runtime_assignment

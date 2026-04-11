@@ -205,6 +205,7 @@ export function RulesPage() {
               >
                 <option value="person">Person</option>
                 <option value="employee">Recognized employee</option>
+                <option value="known_person">Known home person</option>
                 <option value="dog">Dog</option>
                 <option value="vehicle">Vehicle</option>
               </select>

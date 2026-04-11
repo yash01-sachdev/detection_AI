@@ -3,17 +3,20 @@ from sqlalchemy.orm import Session
 
 from app.api.deps import get_db, verify_internal_token
 from app.models.employee import Employee
+from app.models.known_person import KnownPerson
 from app.models.zone import Zone
 from app.schemas.monitoring import (
     DetectionIngestRequest,
     DetectionIngestResponse,
     EmployeeRead,
+    KnownPersonRead,
     WorkerAssignmentRead,
     WorkerMediaUploadResponse,
     WorkerStatusUpdate,
     ZoneRead,
 )
 from app.services.employee_service import list_employee_profiles_for_site
+from app.services.known_person_service import list_known_people_for_site
 from app.services.monitoring_service import ingest_detection_event, list_site_zones
 from app.services.worker_service import get_worker_assignment, record_worker_status, save_worker_live_frame, save_worker_snapshot
 
@@ -36,6 +39,15 @@ def get_site_employees(
     _: None = Depends(verify_internal_token),
 ) -> list[Employee]:
     return list_employee_profiles_for_site(db, site_id)
+
+
+@router.get("/sites/{site_id}/known-people", response_model=list[KnownPersonRead])
+def get_site_known_people(
+    site_id: str,
+    db: Session = Depends(get_db),
+    _: None = Depends(verify_internal_token),
+) -> list[KnownPerson]:
+    return list_known_people_for_site(db, site_id)
 
 
 @router.get("/workers/{worker_name}/assignment", response_model=WorkerAssignmentRead | None)

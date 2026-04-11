@@ -177,12 +177,12 @@ class MonitoringServiceTests(unittest.TestCase):
                     site_id=site.id,
                     camera_id=camera.id,
                     zone_id=zone.id,
-                    entity_type=EntityType.employee,
+                    entity_type=EntityType.known_person,
                     label="Known Resident",
                     track_id="home-known-1",
                     confidence=0.93,
                     occurred_at=datetime.now(UTC),
-                    details={"employee_id": "resident-1", "employee_code": "HOME-001", "source": "unit-test"},
+                    details={"known_person_id": "resident-1", "known_person_name": "Known Resident", "source": "unit-test"},
                 ),
             )
             visitor_response = ingest_detection_event(
