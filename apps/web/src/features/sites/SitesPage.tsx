@@ -1,10 +1,11 @@
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 import type { FormEvent } from 'react'
 
 import { EmptyState } from '../../components/shared/EmptyState'
 import { Panel } from '../../components/shared/Panel'
 import { apiRequest } from '../../lib/api/client'
 import type { Site } from '../../types/models'
+import { useSiteContext } from './SiteContext'
 
 const initialForm = {
   name: '',
@@ -14,17 +15,9 @@ const initialForm = {
 }
 
 export function SitesPage() {
-  const [sites, setSites] = useState<Site[]>([])
   const [form, setForm] = useState(initialForm)
   const [error, setError] = useState('')
-
-  useEffect(() => {
-    apiRequest<Site[]>('/sites')
-      .then(setSites)
-      .catch((loadError) => {
-        setError(loadError instanceof Error ? loadError.message : 'Unable to load sites.')
-      })
-  }, [])
+  const { sites, refreshSites, setSelectedSiteId } = useSiteContext()
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
@@ -35,7 +28,8 @@ export function SitesPage() {
         method: 'POST',
         body: JSON.stringify(form),
       })
-      setSites((current) => [createdSite, ...current])
+      await refreshSites(createdSite.id)
+      setSelectedSiteId(createdSite.id)
       setForm(initialForm)
     } catch (submissionError) {
       setError(

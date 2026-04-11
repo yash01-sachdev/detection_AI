@@ -4,8 +4,9 @@ import logging
 import os
 from contextlib import contextmanager
 from pathlib import Path
+from time import sleep
 
-from app.camera import build_camera_source
+from app.camera import build_camera_source_from_values
 from app.client import ApiClient
 from app.config import get_settings
 from app.detection import build_detector
@@ -74,26 +75,64 @@ def main() -> None:
     api_client = ApiClient(settings)
 
     with _single_instance_lock(lock_path):
-        pipeline = MonitoringPipeline(
-            source=build_camera_source(settings),
-            detector=build_detector(settings),
-            api_client=api_client,
-            frame_stride=settings.frame_stride,
-            alert_cooldown_seconds=settings.alert_cooldown_seconds,
-            worker_name=settings.worker_name,
-            camera_source_type=settings.camera_source_type,
-            camera_source=settings.camera_source,
-            preview_output_dir=settings.preview_output_dir,
-            snapshot_output_dir=settings.snapshot_output_dir,
-            face_recognizer=build_face_recognizer(settings, api_client),
-            posture_analyzer=build_posture_analyzer(
-                pose_estimator=build_pose_estimator(settings),
-                head_down_threshold_seconds=settings.head_down_threshold_seconds,
-                inactivity_threshold_seconds=settings.inactivity_threshold_seconds,
-                movement_threshold_px=settings.inactivity_movement_threshold_px,
-            ),
-        )
-        pipeline.run()
+        while True:
+            assignment = _resolve_runtime_assignment(api_client)
+            if assignment is None or not assignment.is_usable():
+                logging.info("No active worker assignment yet. Waiting for API assignment.")
+                api_client.set_runtime_assignment(None)
+                sleep(settings.assignment_poll_seconds)
+                continue
+
+            api_client.set_runtime_assignment(assignment)
+            logging.info(
+                "Starting worker runtime for site %s on camera %s.",
+                assignment.site_id,
+                assignment.camera_id,
+            )
+
+            try:
+                pipeline = MonitoringPipeline(
+                    source=build_camera_source_from_values(
+                        assignment.camera_source_type,
+                        assignment.camera_source,
+                    ),
+                    detector=build_detector(settings),
+                    api_client=api_client,
+                    frame_stride=settings.frame_stride,
+                    alert_cooldown_seconds=settings.alert_cooldown_seconds,
+                    worker_name=settings.worker_name,
+                    camera_source_type=assignment.camera_source_type,
+                    camera_source=assignment.camera_source,
+                    preview_output_dir=settings.preview_output_dir,
+                    snapshot_output_dir=settings.snapshot_output_dir,
+                    assignment_signature=assignment.signature(),
+                    assignment_poll_seconds=settings.assignment_poll_seconds,
+                    status_publish_seconds=settings.status_publish_seconds,
+                    live_frame_upload_seconds=settings.live_frame_upload_seconds,
+                    face_recognizer=build_face_recognizer(settings, api_client),
+                    posture_analyzer=build_posture_analyzer(
+                        pose_estimator=build_pose_estimator(settings),
+                        head_down_threshold_seconds=settings.head_down_threshold_seconds,
+                        inactivity_threshold_seconds=settings.inactivity_threshold_seconds,
+                        movement_threshold_px=settings.inactivity_movement_threshold_px,
+                    ),
+                )
+                pipeline.run(lambda: _resolve_runtime_assignment(api_client))
+            except Exception as exc:  # pragma: no cover
+                logging.exception("Worker runtime failed: %s", exc)
+                sleep(2)
+
+
+def _resolve_runtime_assignment(api_client: ApiClient):
+    try:
+        assignment = api_client.fetch_worker_assignment()
+    except Exception as exc:  # pragma: no cover
+        logging.warning("Unable to refresh worker assignment from API: %s", exc)
+        return api_client.get_runtime_assignment() or api_client.build_fallback_assignment()
+
+    if assignment is not None:
+        return assignment
+    return api_client.build_fallback_assignment()
 
 
 if __name__ == "__main__":

@@ -41,6 +41,33 @@ class EmployeeDefinition(BaseModel):
     face_profiles: list[EmployeeFaceProfileDefinition] = Field(default_factory=list)
 
 
+class WorkerAssignmentDefinition(BaseModel):
+    worker_name: str
+    site_id: str | None = None
+    site_name: str | None = None
+    camera_id: str | None = None
+    camera_name: str | None = None
+    camera_source_type: str = ""
+    camera_source: str = ""
+    is_active: bool = True
+    assignment_version: int = 0
+
+    def signature(self) -> str:
+        return (
+            f"{self.worker_name}:{self.assignment_version}:{self.site_id or ''}:"
+            f"{self.camera_id or ''}:{self.camera_source_type}:{self.camera_source}:{int(self.is_active)}"
+        )
+
+    def is_usable(self) -> bool:
+        return bool(
+            self.is_active
+            and self.site_id
+            and self.camera_id
+            and self.camera_source_type
+            and self.camera_source
+        )
+
+
 class Detection(BaseModel):
     label: str
     entity_type: str

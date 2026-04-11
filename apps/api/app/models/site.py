@@ -20,4 +20,4 @@ class Site(UUIDMixin, TimestampMixin, Base):
     rules = relationship("Rule", back_populates="site")
     alerts = relationship("Alert", back_populates="site")
     events = relationship("Event", back_populates="site")
-
+    worker_assignments = relationship("WorkerAssignment", back_populates="site")

@@ -4,6 +4,7 @@ import type { FormEvent } from 'react'
 import { EmptyState } from '../../components/shared/EmptyState'
 import { Panel } from '../../components/shared/Panel'
 import { API_BASE_URL, apiRequest } from '../../lib/api/client'
+import { withSiteId } from '../../lib/api/siteScope'
 import type {
   Employee,
   EmployeeAttendanceDay,
@@ -12,8 +13,8 @@ import type {
   EmployeeReport,
   EmployeeTimelineItem,
   EmployeeZoneVisitStat,
-  Site,
 } from '../../types/models'
+import { useSiteContext } from '../sites/SiteContext'
 
 const API_ROOT = API_BASE_URL.replace(/\/api\/v1\/?$/, '')
 const weekdayOptions = [
@@ -182,7 +183,6 @@ function renderAttendanceDay(day: EmployeeAttendanceDay) {
 }
 
 export function EmployeesPage() {
-  const [sites, setSites] = useState<Site[]>([])
   const [employees, setEmployees] = useState<Employee[]>([])
   const [employeeForm, setEmployeeForm] = useState(initialEmployeeForm)
   const [selectedEmployeeId, setSelectedEmployeeId] = useState('')
@@ -192,15 +192,22 @@ export function EmployeesPage() {
   const [report, setReport] = useState<EmployeeReport | null>(null)
   const [error, setError] = useState('')
   const [uploadMessage, setUploadMessage] = useState('')
+  const { selectedSite, selectedSiteId } = useSiteContext()
 
   useEffect(() => {
-    Promise.all([apiRequest<Site[]>('/sites'), apiRequest<Employee[]>('/employees')])
-      .then(([loadedSites, loadedEmployees]) => {
-        setSites(loadedSites)
+    if (!selectedSiteId) {
+      setEmployees([])
+      setEmployeeForm((current) => ({ ...current, site_id: '' }))
+      setSelectedEmployeeId('')
+      setUploadEmployeeId('')
+      setReport(null)
+      return
+    }
+
+    apiRequest<Employee[]>(withSiteId('/employees', selectedSiteId))
+      .then((loadedEmployees) => {
         setEmployees(loadedEmployees)
-        if (loadedSites.length) {
-          setEmployeeForm((current) => ({ ...current, site_id: current.site_id || loadedSites[0].id }))
-        }
+        setEmployeeForm((current) => ({ ...current, site_id: selectedSiteId }))
         if (loadedEmployees.length) {
           setSelectedEmployeeId(loadedEmployees[0].id)
           setUploadEmployeeId(loadedEmployees[0].id)
@@ -209,7 +216,7 @@ export function EmployeesPage() {
       .catch((loadError) => {
         setError(loadError instanceof Error ? loadError.message : 'Unable to load employees.')
       })
-  }, [])
+  }, [selectedSiteId])
 
   useEffect(() => {
     const employeeIds = new Set(employees.map((employee) => employee.id))
@@ -230,6 +237,7 @@ export function EmployeesPage() {
 
   useEffect(() => {
     if (!selectedEmployeeId) {
+      setReport(null)
       return
     }
 
@@ -326,15 +334,20 @@ export function EmployeesPage() {
     event.preventDefault()
     setError('')
 
+    if (!selectedSiteId) {
+      setError('Choose a site in the header first.')
+      return
+    }
+
     try {
       const createdEmployee = await apiRequest<Employee>('/employees', {
         method: 'POST',
-        body: JSON.stringify(employeeForm),
+        body: JSON.stringify({ ...employeeForm, site_id: selectedSiteId }),
       })
       setEmployees((current) => [createdEmployee, ...current])
       selectEmployee(createdEmployee.id)
       setUploadEmployeeId(createdEmployee.id)
-      setEmployeeForm((current) => ({ ...initialEmployeeForm, site_id: current.site_id || employeeForm.site_id }))
+      setEmployeeForm((current) => ({ ...initialEmployeeForm, site_id: current.site_id || selectedSiteId }))
     } catch (submissionError) {
       setError(submissionError instanceof Error ? submissionError.message : 'Unable to create employee.')
     }
@@ -378,24 +391,13 @@ export function EmployeesPage() {
       <div className="page-grid page-grid--two-up">
         <Panel
           title="Create Employee"
-          subtitle="Add the employee record, define the shift schedule, then upload one or more clear face photos."
+          subtitle={
+            selectedSite
+              ? `Add a person record for ${selectedSite.name}, define the shift schedule, then upload one or more clear face photos.`
+              : 'Choose a site in the header before adding people and face profiles.'
+          }
         >
           <form className="stack" onSubmit={handleEmployeeSubmit}>
-            <label className="field">
-              <span>Site</span>
-              <select
-                value={employeeForm.site_id}
-                onChange={(event) =>
-                  setEmployeeForm((current) => ({ ...current, site_id: event.target.value }))
-                }
-              >
-                {sites.map((site) => (
-                  <option key={site.id} value={site.id}>
-                    {site.name}
-                  </option>
-                ))}
-              </select>
-            </label>
             <label className="field">
               <span>Employee code</span>
               <input
@@ -494,7 +496,7 @@ export function EmployeesPage() {
               </div>
             </div>
             {error ? <p className="form-error">{error}</p> : null}
-            <button className="primary-button" disabled={!sites.length} type="submit">
+            <button className="primary-button" disabled={!selectedSiteId} type="submit">
               Create employee
             </button>
           </form>
@@ -534,7 +536,11 @@ export function EmployeesPage() {
 
         <Panel
           title="Employees"
-          subtitle="Pick one employee to open the multi-day report below."
+          subtitle={
+            selectedSite
+              ? `Pick one person from ${selectedSite.name} to open the multi-day report below.`
+              : 'Choose a site in the header to load its people.'
+          }
         >
           {employees.length ? (
             <div className="list">
@@ -574,7 +580,7 @@ export function EmployeesPage() {
               })}
             </div>
           ) : (
-            <EmptyState message="No employees yet. Create one and upload a face image to begin recognition." />
+            <EmptyState message={selectedSite ? 'No people yet for this site. Create one and upload a face image to begin recognition.' : 'Select a site to load its people.'} />
           )}
         </Panel>
       </div>

@@ -4,12 +4,12 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from time import monotonic, sleep
-from typing import Any
+from typing import Any, Callable
 
 from app.camera import BaseCameraSource
 from app.client import ApiClient
 from app.detection import BaseDetector
-from app.types import BoundingBox, Detection, ZoneDefinition
+from app.types import BoundingBox, Detection, WorkerAssignmentDefinition, ZoneDefinition
 
 logger = logging.getLogger(__name__)
 
@@ -146,6 +146,10 @@ class MonitoringPipeline:
         camera_source: str,
         preview_output_dir: str,
         snapshot_output_dir: str,
+        assignment_signature: str,
+        assignment_poll_seconds: int,
+        status_publish_seconds: int,
+        live_frame_upload_seconds: int,
         face_recognizer: Any | None = None,
         posture_analyzer: Any | None = None,
     ) -> None:
@@ -173,16 +177,32 @@ class MonitoringPipeline:
         self.preview_status_path = self.preview_dir / "status.json"
         self.snapshot_dir = Path(snapshot_output_dir).resolve()
         self.snapshot_dir.mkdir(parents=True, exist_ok=True)
+        self.assignment_signature = assignment_signature
+        self.assignment_poll_seconds = max(assignment_poll_seconds, 1)
+        self.status_publish_seconds = max(status_publish_seconds, 1)
+        self.live_frame_upload_seconds = max(live_frame_upload_seconds, 1)
         self.zones: list[ZoneDefinition] = []
         self.last_zone_refresh_at = 0.0
+        self.last_assignment_check_at = 0.0
+        self.last_status_publish_at = 0.0
+        self.last_live_upload_at = 0.0
 
-    def run(self) -> None:
+    def run(
+        self,
+        assignment_provider: Callable[[], WorkerAssignmentDefinition | None] | None = None,
+    ) -> str:
         frame_count = 0
         self._open_source()
         self._refresh_zones(force=True)
 
         try:
             while True:
+                if assignment_provider is not None:
+                    next_assignment = self._poll_assignment(assignment_provider)
+                    if next_assignment is not None:
+                        logger.info("Worker assignment changed. Restarting runtime.")
+                        return "assignment_changed"
+
                 ok, frame = self.source.read()
                 if not ok:
                     logger.warning("Unable to read frame from camera source.")
@@ -192,6 +212,7 @@ class MonitoringPipeline:
                         last_detection_count=0,
                         last_labels=[],
                         message="Camera read failed. Retrying connection.",
+                        force_publish=True,
                     )
                     self._reconnect_source()
                     continue
@@ -231,8 +252,10 @@ class MonitoringPipeline:
                 last_detection_count=0,
                 last_labels=[],
                 message="Worker stopped and camera was released.",
+                force_publish=True,
             )
             logger.info("Camera source released.")
+        return "stopped"
 
     def _open_source(self) -> None:
         self.source.open()
@@ -243,6 +266,7 @@ class MonitoringPipeline:
             last_detection_count=0,
             last_labels=[],
             message="Camera opened. Waiting for detections.",
+            force_publish=True,
         )
 
     def _reconnect_source(self) -> None:
@@ -261,6 +285,7 @@ class MonitoringPipeline:
                 last_detection_count=0,
                 last_labels=[],
                 message="Camera reconnected. Waiting for detections.",
+                force_publish=True,
             )
         except Exception as exc:  # pragma: no cover
             logger.warning("Failed to reopen camera source: %s", exc)
@@ -419,6 +444,7 @@ class MonitoringPipeline:
             last_labels=labels,
             message=message,
         )
+        self._publish_live_frame_if_due()
 
     def _assign_presence_sessions(self, detections: list[Detection]) -> list[Detection]:
         if not detections:
@@ -602,7 +628,9 @@ class MonitoringPipeline:
         last_detection_count: int,
         last_labels: list[str],
         message: str,
+        force_publish: bool = False,
     ) -> None:
+        now = monotonic()
         payload = {
             "worker_name": self.worker_name,
             "camera_source_type": self.camera_source_type,
@@ -618,6 +646,20 @@ class MonitoringPipeline:
             json.dumps(payload, indent=2),
             encoding="utf-8",
         )
+        if force_publish or now - self.last_status_publish_at >= self.status_publish_seconds:
+            try:
+                self.api_client.publish_worker_status(
+                    camera_connected=camera_connected,
+                    camera_source_type=self.camera_source_type,
+                    camera_source=self.camera_source,
+                    frame_count=frame_count,
+                    last_detection_count=last_detection_count,
+                    last_labels=last_labels,
+                    message=message,
+                )
+                self.last_status_publish_at = now
+            except Exception as exc:  # pragma: no cover
+                logger.warning("Failed to publish worker status: %s", exc)
 
     def _save_alert_snapshot(self, frame: Any, detection: Detection) -> str | None:
         import cv2
@@ -656,7 +698,39 @@ class MonitoringPipeline:
         if not cv2.imwrite(str(file_path), snapshot):
             return None
 
-        return f"/media/snapshots/{file_name}"
+        try:
+            uploaded_path = self.api_client.upload_snapshot(str(file_path))
+        except Exception as exc:  # pragma: no cover
+            logger.warning("Failed to upload alert snapshot: %s", exc)
+            return None
+        return uploaded_path or None
+
+    def _publish_live_frame_if_due(self) -> None:
+        now = monotonic()
+        if now - self.last_live_upload_at < self.live_frame_upload_seconds:
+            return
+
+        try:
+            self.api_client.upload_live_frame(str(self.preview_frame_path))
+            self.last_live_upload_at = now
+        except Exception as exc:  # pragma: no cover
+            logger.warning("Failed to upload live frame: %s", exc)
+
+    def _poll_assignment(
+        self,
+        assignment_provider: Callable[[], WorkerAssignmentDefinition | None],
+    ) -> WorkerAssignmentDefinition | None:
+        now = monotonic()
+        if now - self.last_assignment_check_at < self.assignment_poll_seconds:
+            return None
+
+        self.last_assignment_check_at = now
+        assignment = assignment_provider()
+        if assignment is None:
+            return WorkerAssignmentDefinition(worker_name=self.worker_name, is_active=False)
+        if assignment.signature() != self.assignment_signature:
+            return assignment
+        return None
 
 
 def _bbox_center(bbox: BoundingBox) -> tuple[float, float]:

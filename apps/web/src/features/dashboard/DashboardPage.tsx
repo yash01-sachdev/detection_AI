@@ -11,18 +11,26 @@ import {
   getAlertZoneName,
 } from '../../lib/alertPresentation'
 import { apiRequest } from '../../lib/api/client'
+import { withSiteId } from '../../lib/api/siteScope'
 import type { DashboardOverview } from '../../types/models'
+import { useSiteContext } from '../sites/SiteContext'
 
 export function DashboardPage() {
   const [overview, setOverview] = useState<DashboardOverview | null>(null)
   const [error, setError] = useState('')
+  const { selectedSite, selectedSiteId } = useSiteContext()
 
   useEffect(() => {
+    if (!selectedSiteId) {
+      setOverview(null)
+      return
+    }
+
     let isMounted = true
 
     async function loadOverview() {
       try {
-        const nextOverview = await apiRequest<DashboardOverview>('/dashboard/overview')
+        const nextOverview = await apiRequest<DashboardOverview>(withSiteId('/dashboard/overview', selectedSiteId))
         if (!isMounted) {
           return
         }
@@ -43,20 +51,28 @@ export function DashboardPage() {
       isMounted = false
       window.clearInterval(intervalId)
     }
-  }, [])
+  }, [selectedSiteId])
 
   return (
     <div className="page-grid">
       <Panel
         title="Overview"
-        subtitle="A quick view of the current V1 operating surface."
+        subtitle={
+          selectedSite
+            ? `A quick view of the current V1 operating surface for ${selectedSite.name}.`
+            : 'Pick a site in the header to view its operating surface.'
+        }
       >
         {error ? <p className="form-error">{error}</p> : null}
-        <div className="stats-grid">
-          {overview?.stats.map((stat) => (
-            <StatCard key={stat.key} label={stat.label} value={stat.value} />
-          ))}
-        </div>
+        {overview ? (
+          <div className="stats-grid">
+            {overview.stats.map((stat) => (
+              <StatCard key={stat.key} label={stat.label} value={stat.value} />
+            ))}
+          </div>
+        ) : (
+          <EmptyState message="Select a site to load the overview." />
+        )}
       </Panel>
 
       <Panel
@@ -87,8 +103,10 @@ export function DashboardPage() {
               )
             })}
           </div>
+        ) : overview ? (
+          <EmptyState message="No alerts yet for this site. Once the worker starts sending detections, alerts will appear here." />
         ) : (
-          <EmptyState message="No alerts yet. Once the worker starts sending detections, alerts will appear here." />
+          <EmptyState message="Select a site to load recent alerts." />
         )}
       </Panel>
     </div>

@@ -10,7 +10,7 @@ from app.api.router import api_router
 from app.core.config import get_settings
 from app.db.base import Base
 from app.db.session import SessionLocal, engine
-from app.models import Alert, Camera, Employee, EmployeeFaceProfile, Event, Rule, Site, User, Zone
+from app.models import Alert, Camera, Employee, EmployeeFaceProfile, Event, Rule, Site, User, WorkerAssignment, Zone
 from app.services.auth_service import bootstrap_default_admin
 
 settings = get_settings()

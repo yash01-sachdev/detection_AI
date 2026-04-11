@@ -27,6 +27,8 @@ from app.schemas.monitoring import (
     RuleRead,
     SiteCreate,
     SiteRead,
+    WorkerAssignmentRead,
+    WorkerAssignmentUpdate,
     ZoneCreate,
     ZoneRead,
 )
@@ -42,6 +44,7 @@ from app.services.monitoring_service import (
     create_site_with_default_rules,
     list_mode_templates,
 )
+from app.services.worker_service import build_live_status, list_worker_assignments, upsert_worker_assignment
 
 router = APIRouter()
 live_dir = Path(__file__).resolve().parents[5] / "storage" / "live"
@@ -222,15 +225,43 @@ def list_alerts(
 
 @router.get("/dashboard/overview", response_model=DashboardOverview)
 def get_dashboard_overview(
+    site_id: str | None = None,
     db: Session = Depends(get_db),
     _: object = Depends(require_admin),
 ) -> DashboardOverview:
-    return build_dashboard_overview(db)
+    return build_dashboard_overview(db, site_id=site_id)
+
+
+@router.get("/worker-assignments", response_model=list[WorkerAssignmentRead])
+def get_worker_assignments(
+    db: Session = Depends(get_db),
+    _: object = Depends(require_admin),
+) -> list[WorkerAssignmentRead]:
+    return list_worker_assignments(db)
+
+
+@router.put("/worker-assignments/{worker_name}", response_model=WorkerAssignmentRead)
+def put_worker_assignment(
+    worker_name: str,
+    payload: WorkerAssignmentUpdate,
+    db: Session = Depends(get_db),
+    _: object = Depends(require_admin),
+) -> WorkerAssignmentRead:
+    try:
+        return upsert_worker_assignment(db, worker_name, payload)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
 
 
 @router.get("/live/status", response_model=LiveMonitorStatus)
-def get_live_status(_: object = Depends(require_admin)) -> LiveMonitorStatus:
-    live_dir.mkdir(parents=True, exist_ok=True)
+def get_live_status(
+    site_id: str | None = None,
+    db: Session = Depends(get_db),
+    _: object = Depends(require_admin),
+) -> LiveMonitorStatus:
+    live_status = build_live_status(db, site_id=site_id)
+    if site_id or live_status.worker_name:
+        return live_status
 
     payload: dict[str, object] = {
         "message": "Worker preview is not available yet.",

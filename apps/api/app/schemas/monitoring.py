@@ -287,12 +287,62 @@ class DashboardOverview(BaseModel):
     recent_alerts: list[AlertRead]
 
 
+class WorkerAssignmentUpdate(BaseModel):
+    site_id: str | None = None
+    camera_id: str | None = None
+    is_active: bool = True
+
+
+class WorkerAssignmentRead(BaseModel):
+    id: str
+    worker_name: str
+    site_id: str | None = None
+    site_name: str | None = None
+    site_type: str | None = None
+    camera_id: str | None = None
+    camera_name: str | None = None
+    camera_source_type: str = ""
+    camera_source: str = ""
+    is_active: bool
+    assignment_version: int
+    camera_connected: bool = False
+    frame_count: int = 0
+    last_detection_count: int = 0
+    last_labels: list[str] = Field(default_factory=list)
+    message: str = ""
+    frame_url: str | None = None
+    frame_updated_at: datetime | None = None
+    last_heartbeat_at: datetime | None = None
+
+
+class WorkerStatusUpdate(BaseModel):
+    assignment_version: int = Field(ge=1)
+    camera_connected: bool = False
+    camera_source_type: str = ""
+    camera_source: str = ""
+    frame_count: int = 0
+    last_detection_count: int = 0
+    last_labels: list[str] = Field(default_factory=list)
+    message: str = ""
+    frame_updated_at: datetime | None = None
+
+
+class WorkerMediaUploadResponse(BaseModel):
+    path: str
+
+
 class LiveMonitorStatus(BaseModel):
     worker_name: str = ""
+    assignment_active: bool = False
+    site_id: str | None = None
+    site_name: str | None = None
+    camera_id: str | None = None
+    camera_name: str | None = None
     camera_source_type: str = ""
     camera_source: str = ""
     camera_connected: bool = False
     frame_updated_at: datetime | None = None
+    last_heartbeat_at: datetime | None = None
     frame_count: int = 0
     last_detection_count: int = 0
     last_labels: list[str] = Field(default_factory=list)

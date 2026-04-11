@@ -4,7 +4,9 @@ import type { FormEvent } from 'react'
 import { EmptyState } from '../../components/shared/EmptyState'
 import { Panel } from '../../components/shared/Panel'
 import { apiRequest } from '../../lib/api/client'
-import type { Camera, Site } from '../../types/models'
+import { withSiteId } from '../../lib/api/siteScope'
+import type { Camera } from '../../types/models'
+import { useSiteContext } from '../sites/SiteContext'
 
 const initialForm = {
   site_id: '',
@@ -15,39 +17,47 @@ const initialForm = {
 }
 
 export function CamerasPage() {
-  const [sites, setSites] = useState<Site[]>([])
   const [cameras, setCameras] = useState<Camera[]>([])
   const [form, setForm] = useState(initialForm)
   const [error, setError] = useState('')
+  const { selectedSite, selectedSiteId } = useSiteContext()
 
   useEffect(() => {
-    Promise.all([apiRequest<Site[]>('/sites'), apiRequest<Camera[]>('/cameras')])
-      .then(([loadedSites, loadedCameras]) => {
-        setSites(loadedSites)
+    if (!selectedSiteId) {
+      setCameras([])
+      setForm((current) => ({ ...current, site_id: '' }))
+      return
+    }
+
+    apiRequest<Camera[]>(withSiteId('/cameras', selectedSiteId))
+      .then((loadedCameras) => {
         setCameras(loadedCameras)
-        if (loadedSites.length) {
-          setForm((current) => ({
-            ...current,
-            site_id: current.site_id || loadedSites[0].id,
-          }))
-        }
+        setForm((current) => ({
+          ...current,
+          site_id: selectedSiteId,
+        }))
       })
       .catch((loadError) => {
         setError(loadError instanceof Error ? loadError.message : 'Unable to load cameras.')
       })
-  }, [])
+  }, [selectedSiteId])
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
     setError('')
 
+    if (!selectedSiteId) {
+      setError('Choose a site in the header first.')
+      return
+    }
+
     try {
       const createdCamera = await apiRequest<Camera>('/cameras', {
         method: 'POST',
-        body: JSON.stringify(form),
+        body: JSON.stringify({ ...form, site_id: selectedSiteId }),
       })
       setCameras((current) => [createdCamera, ...current])
-      setForm((current) => ({ ...initialForm, site_id: current.site_id || form.site_id }))
+      setForm((current) => ({ ...initialForm, site_id: current.site_id || selectedSiteId }))
     } catch (submissionError) {
       setError(
         submissionError instanceof Error
@@ -61,24 +71,13 @@ export function CamerasPage() {
     <div className="page-grid page-grid--two-up">
       <Panel
         title="Register Camera"
-        subtitle="Use `0` for a laptop webcam or paste a DroidCam / RTSP URL for network streams."
+        subtitle={
+          selectedSite
+            ? `Register a camera for ${selectedSite.name}. Use \`0\` for a laptop webcam or paste a stream URL for network sources.`
+            : 'Choose a site in the header before registering a camera.'
+        }
       >
         <form className="stack" onSubmit={handleSubmit}>
-          <label className="field">
-            <span>Site</span>
-            <select
-              value={form.site_id}
-              onChange={(event) =>
-                setForm((current) => ({ ...current, site_id: event.target.value }))
-              }
-            >
-              {sites.map((site) => (
-                <option key={site.id} value={site.id}>
-                  {site.name}
-                </option>
-              ))}
-            </select>
-          </label>
           <label className="field">
             <span>Camera name</span>
             <input
@@ -115,7 +114,7 @@ export function CamerasPage() {
             />
           </label>
           {error ? <p className="form-error">{error}</p> : null}
-          <button className="primary-button" disabled={!sites.length} type="submit">
+          <button className="primary-button" disabled={!selectedSiteId} type="submit">
             Add camera
           </button>
         </form>
@@ -141,7 +140,7 @@ export function CamerasPage() {
             ))}
           </div>
         ) : (
-          <EmptyState message="No cameras yet. Add your webcam or DroidCam source here first." />
+          <EmptyState message={selectedSite ? 'No cameras yet for this site. Add one here first.' : 'Select a site to load its cameras.'} />
         )}
       </Panel>
     </div>

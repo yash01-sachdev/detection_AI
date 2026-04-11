@@ -244,10 +244,6 @@ class EmployeeFaceRecognizer:
 
 
 def build_face_recognizer(settings: Settings, api_client: ApiClient) -> EmployeeFaceRecognizer | None:
-    if not settings.site_id:
-        logger.info("Face recognition is disabled because SITE_ID is not configured.")
-        return None
-
     recognizer = EmployeeFaceRecognizer(
         api_client=api_client,
         api_base_url=settings.api_base_url,

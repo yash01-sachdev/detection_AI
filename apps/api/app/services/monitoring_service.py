@@ -54,7 +54,7 @@ MODE_RULES: dict[SiteType, dict[str, object]] = {
                 "name": "Restricted Zone Entry",
                 "description": "Alert when anyone enters a restricted zone.",
                 "severity": RuleSeverity.high,
-                "conditions": {"entity_type": "person", "zone_type": "restricted"},
+                "conditions": {"entity_type": ["person", "employee"], "zone_type": "restricted"},
                 "actions": {"create_alert": True, "snapshot": True},
             },
             {
@@ -62,7 +62,7 @@ MODE_RULES: dict[SiteType, dict[str, object]] = {
                 "name": "Desk Inactivity Watch",
                 "description": "Track inactivity in desk zones for later workflow analysis.",
                 "severity": RuleSeverity.medium,
-                "conditions": {"entity_type": "person", "zone_type": "desk", "posture": "inactive"},
+                "conditions": {"entity_type": ["person", "employee"], "zone_type": "desk", "posture": "inactive"},
                 "actions": {"create_alert": False, "record_metric": True},
             },
             {
@@ -70,7 +70,7 @@ MODE_RULES: dict[SiteType, dict[str, object]] = {
                 "name": "Head-Down Desk Alert",
                 "description": "Alert when a person stays in a head-down posture at a desk.",
                 "severity": RuleSeverity.medium,
-                "conditions": {"entity_type": "person", "zone_type": "desk", "posture": "head_down"},
+                "conditions": {"entity_type": ["person", "employee"], "zone_type": "desk", "posture": "head_down"},
                 "actions": {"create_alert": True, "snapshot": True},
             },
         ],
@@ -92,7 +92,7 @@ MODE_RULES: dict[SiteType, dict[str, object]] = {
                 "name": "Unauthorized Storage Access",
                 "description": "Alert when someone enters the restricted storage zone.",
                 "severity": RuleSeverity.high,
-                "conditions": {"entity_type": "person", "zone_type": "restricted"},
+                "conditions": {"entity_type": ["person", "employee"], "zone_type": "restricted"},
                 "actions": {"create_alert": True, "snapshot": True},
             },
         ],
@@ -155,7 +155,25 @@ def create_site_with_default_rules(db: Session, payload: SiteCreate) -> Site:
     return site
 
 
-def build_dashboard_overview(db: Session) -> DashboardOverview:
+def build_dashboard_overview(db: Session, site_id: str | None = None) -> DashboardOverview:
+    if site_id:
+        stats = [
+            DashboardStat(key="cameras", label="Cameras", value=db.scalar(select(func.count(Camera.id)).where(Camera.site_id == site_id)) or 0),
+            DashboardStat(key="zones", label="Zones", value=db.scalar(select(func.count(Zone.id)).where(Zone.site_id == site_id)) or 0),
+            DashboardStat(key="rules", label="Rules", value=db.scalar(select(func.count(Rule.id)).where(Rule.site_id == site_id)) or 0),
+            DashboardStat(key="alerts", label="Alerts", value=db.scalar(select(func.count(Alert.id)).where(Alert.site_id == site_id)) or 0),
+            DashboardStat(key="events", label="Events", value=db.scalar(select(func.count(Event.id)).where(Event.site_id == site_id)) or 0),
+        ]
+        recent_alerts = list(
+            db.scalars(
+                select(Alert)
+                .where(Alert.site_id == site_id)
+                .order_by(Alert.occurred_at.desc())
+                .limit(8)
+            )
+        )
+        return DashboardOverview(stats=stats, recent_alerts=recent_alerts)
+
     stats = [
         DashboardStat(key="sites", label="Sites", value=db.scalar(select(func.count(Site.id))) or 0),
         DashboardStat(key="cameras", label="Cameras", value=db.scalar(select(func.count(Camera.id))) or 0),
@@ -515,14 +533,7 @@ def _entity_type_matches(actual: object, expected: object) -> bool:
     actual_value = _normalize_value(actual)
     expected_value = _normalize_value(expected)
 
-    if actual_value == expected_value:
-        return True
-
-    # An employee is still a person for generic person-scoped rules.
-    if expected_value == "person" and actual_value == "employee":
-        return True
-
-    return False
+    return actual_value == expected_value
 
 
 def _unknown_subjects_likely_match(

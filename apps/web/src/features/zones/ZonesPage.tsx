@@ -4,7 +4,9 @@ import type { FormEvent, MouseEvent } from 'react'
 import { EmptyState } from '../../components/shared/EmptyState'
 import { Panel } from '../../components/shared/Panel'
 import { API_BASE_URL, apiRequest } from '../../lib/api/client'
-import type { LiveMonitorStatus, Site, Zone, ZonePoint } from '../../types/models'
+import { withSiteId } from '../../lib/api/siteScope'
+import type { LiveMonitorStatus, Zone, ZonePoint } from '../../types/models'
+import { useSiteContext } from '../sites/SiteContext'
 
 const API_ROOT = API_BASE_URL.replace(/\/api\/v1\/?$/, '')
 
@@ -71,7 +73,6 @@ function suggestRestriction(zoneType: string) {
 }
 
 export function ZonesPage() {
-  const [sites, setSites] = useState<Site[]>([])
   const [zones, setZones] = useState<Zone[]>([])
   const [form, setForm] = useState(initialForm)
   const [status, setStatus] = useState<LiveMonitorStatus | null>(null)
@@ -80,30 +81,39 @@ export function ZonesPage() {
   const [deletingZoneId, setDeletingZoneId] = useState('')
   const [imageSize, setImageSize] = useState({ width: 0, height: 0 })
   const imageRef = useRef<HTMLImageElement | null>(null)
+  const { selectedSite, selectedSiteId } = useSiteContext()
 
   useEffect(() => {
-    Promise.all([apiRequest<Site[]>('/sites'), apiRequest<Zone[]>('/zones')])
-      .then(([loadedSites, loadedZones]) => {
-        setSites(loadedSites)
+    if (!selectedSiteId) {
+      setZones([])
+      setForm((current) => ({ ...current, site_id: '' }))
+      return
+    }
+
+    apiRequest<Zone[]>(withSiteId('/zones', selectedSiteId))
+      .then((loadedZones) => {
         setZones(loadedZones)
-        if (loadedSites.length) {
-          setForm((current) => ({
-            ...current,
-            site_id: current.site_id || loadedSites[0].id,
-          }))
-        }
+        setForm((current) => ({
+          ...current,
+          site_id: selectedSiteId,
+        }))
       })
       .catch((loadError) => {
         setError(loadError instanceof Error ? loadError.message : 'Unable to load zones.')
       })
-  }, [])
+  }, [selectedSiteId])
 
   useEffect(() => {
+    if (!selectedSiteId) {
+      setStatus(null)
+      return
+    }
+
     let isMounted = true
 
     async function loadStatus() {
       try {
-        const nextStatus = await apiRequest<LiveMonitorStatus>('/live/status')
+        const nextStatus = await apiRequest<LiveMonitorStatus>(withSiteId('/live/status', selectedSiteId))
         if (!isMounted) {
           return
         }
@@ -123,14 +133,11 @@ export function ZonesPage() {
       isMounted = false
       window.clearInterval(intervalId)
     }
-  }, [])
+  }, [selectedSiteId])
 
   const frameUrl = useMemo(() => buildFrameUrl(status), [status])
   const parsedDraft = useMemo(() => parsePoints(form.pointsText), [form.pointsText])
-  const currentSiteZones = useMemo(
-    () => zones.filter((zone) => zone.site_id === form.site_id),
-    [form.site_id, zones],
-  )
+  const currentSiteZones = useMemo(() => zones, [zones])
 
   function updatePoints(points: ZonePoint[]) {
     setForm((current) => ({
@@ -186,6 +193,11 @@ export function ZonesPage() {
     setError('')
     setSaveMessage('')
 
+    if (!selectedSiteId) {
+      setError('Choose a site in the header first.')
+      return
+    }
+
     if (parsedDraft.error) {
       setError(parsedDraft.error)
       return
@@ -200,7 +212,7 @@ export function ZonesPage() {
       const createdZone = await apiRequest<Zone>('/zones', {
         method: 'POST',
         body: JSON.stringify({
-          site_id: form.site_id,
+          site_id: selectedSiteId,
           name: form.name,
           zone_type: form.zone_type,
           color: form.color,
@@ -211,7 +223,7 @@ export function ZonesPage() {
       setZones((current) => [createdZone, ...current])
       setForm((current) => ({
         ...initialForm,
-        site_id: current.site_id || form.site_id,
+        site_id: current.site_id || selectedSiteId,
         zone_type: current.zone_type,
         color: current.color,
         is_restricted: current.is_restricted,
@@ -247,25 +259,13 @@ export function ZonesPage() {
     <div className="page-grid page-grid--two-up">
       <Panel
         title="Create Zone"
-        subtitle="Choose the site, then click the live frame to draw the zone exactly where the worker sees it."
+        subtitle={
+          selectedSite
+            ? `Click the live frame to draw a zone for ${selectedSite.name} exactly where the worker sees it.`
+            : 'Choose a site in the header, then draw the zone exactly where the worker sees it.'
+        }
       >
         <form className="stack" onSubmit={handleSubmit}>
-          <label className="field">
-            <span>Site</span>
-            <select
-              value={form.site_id}
-              onChange={(event) =>
-                setForm((current) => ({ ...current, site_id: event.target.value }))
-              }
-            >
-              {sites.map((site) => (
-                <option key={site.id} value={site.id}>
-                  {site.name}
-                </option>
-              ))}
-            </select>
-          </label>
-
           <label className="field">
             <span>Zone name</span>
             <input
@@ -407,7 +407,7 @@ export function ZonesPage() {
               ) : (
                 <div className="zone-editor__empty">
                   <strong>No live frame yet</strong>
-                  <p>Start the worker and open the camera feed so you can draw zones on the actual scene.</p>
+                  <p>{selectedSite ? 'Start the worker and open the camera feed so you can draw zones on the actual scene.' : 'Select a site in the header to load the live frame.'}</p>
                 </div>
               )}
             </div>
@@ -439,7 +439,7 @@ export function ZonesPage() {
           {error ? <p className="form-error">{error}</p> : null}
           {saveMessage ? <p className="form-success">{saveMessage}</p> : null}
 
-          <button className="primary-button" disabled={!sites.length} type="submit">
+          <button className="primary-button" disabled={!selectedSiteId} type="submit">
             Save zone
           </button>
         </form>
@@ -474,7 +474,7 @@ export function ZonesPage() {
             ))}
           </div>
         ) : (
-          <EmptyState message="No zones yet for this site. Draw one directly on the live frame." />
+          <EmptyState message={selectedSite ? 'No zones yet for this site. Draw one directly on the live frame.' : 'Select a site to load its zones.'} />
         )}
       </Panel>
     </div>

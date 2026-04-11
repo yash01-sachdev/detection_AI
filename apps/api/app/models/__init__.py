@@ -5,6 +5,7 @@ from app.models.event import Event
 from app.models.rule import Rule
 from app.models.site import Site
 from app.models.user import User
+from app.models.worker_assignment import WorkerAssignment
 from app.models.zone import Zone
 
 __all__ = [
@@ -16,6 +17,6 @@ __all__ = [
     "Rule",
     "Site",
     "User",
+    "WorkerAssignment",
     "Zone",
 ]
-

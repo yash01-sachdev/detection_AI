@@ -162,6 +162,50 @@ class MonitoringServiceTests(unittest.TestCase):
         self.assertEqual(alert.details["zone_name"], "Finance Vault")
         self.assertEqual(alert.details["employee_code"], "EMP-001")
 
+    def test_home_gate_rule_ignores_recognized_home_resident(self) -> None:
+        site, camera, zone = self._create_site_camera_zone(
+            site_type=SiteType.home,
+            zone_type=ZoneType.entry,
+            zone_name="Front Gate",
+            is_restricted=False,
+        )
+
+        with self.SessionLocal() as db:
+            resident_response = ingest_detection_event(
+                db,
+                DetectionIngestRequest(
+                    site_id=site.id,
+                    camera_id=camera.id,
+                    zone_id=zone.id,
+                    entity_type=EntityType.employee,
+                    label="Known Resident",
+                    track_id="home-known-1",
+                    confidence=0.93,
+                    occurred_at=datetime.now(UTC),
+                    details={"employee_id": "resident-1", "employee_code": "HOME-001", "source": "unit-test"},
+                ),
+            )
+            visitor_response = ingest_detection_event(
+                db,
+                DetectionIngestRequest(
+                    site_id=site.id,
+                    camera_id=camera.id,
+                    zone_id=zone.id,
+                    entity_type=EntityType.person,
+                    label="person",
+                    track_id="home-visitor-1",
+                    confidence=0.89,
+                    occurred_at=datetime.now(UTC),
+                    details={"source": "unit-test"},
+                ),
+            )
+            visitor_alert = db.get(Alert, visitor_response.alert_id)
+
+        self.assertIsNone(resident_response.alert_id)
+        self.assertIsNotNone(visitor_response.alert_id)
+        self.assertIsNotNone(visitor_alert)
+        self.assertEqual(visitor_alert.title, "Unknown Person At Gate")
+
     def test_restaurant_smoking_area_alert_requires_employee_match(self) -> None:
         site, camera, zone = self._create_site_camera_zone(
             site_type=SiteType.restaurant,

@@ -132,10 +132,14 @@ class StreamSource(BaseCameraSource):
 
 
 def build_camera_source(settings: Settings) -> BaseCameraSource:
-    if settings.camera_source_type == "webcam":
-        return WebcamSource(int(settings.camera_source))
+    return build_camera_source_from_values(settings.camera_source_type, settings.camera_source)
 
-    if settings.camera_source_type in {"droidcam", "rtsp", "uploaded_video"}:
-        return StreamSource(settings.camera_source)
 
-    raise ValueError(f"Unsupported camera source type: {settings.camera_source_type}")
+def build_camera_source_from_values(source_type: str, source_value: str) -> BaseCameraSource:
+    if source_type == "webcam":
+        return WebcamSource(int(source_value))
+
+    if source_type in {"droidcam", "rtsp", "uploaded_video"}:
+        return StreamSource(source_value)
+
+    raise ValueError(f"Unsupported camera source type: {source_type}")

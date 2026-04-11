@@ -4,7 +4,9 @@ import type { FormEvent } from 'react'
 import { EmptyState } from '../../components/shared/EmptyState'
 import { Panel } from '../../components/shared/Panel'
 import { apiRequest } from '../../lib/api/client'
-import type { Rule, Site, Zone } from '../../types/models'
+import { withSiteId } from '../../lib/api/siteScope'
+import type { Rule, Zone } from '../../types/models'
+import { useSiteContext } from '../sites/SiteContext'
 
 const initialRuleForm = {
   site_id: '',
@@ -46,39 +48,36 @@ function describeRule(rule: Rule, zonesById: Record<string, Zone>) {
 }
 
 export function RulesPage() {
-  const [sites, setSites] = useState<Site[]>([])
   const [zones, setZones] = useState<Zone[]>([])
   const [rules, setRules] = useState<Rule[]>([])
-  const [selectedSiteId, setSelectedSiteId] = useState('')
   const [form, setForm] = useState(initialRuleForm)
   const [error, setError] = useState('')
   const [saveMessage, setSaveMessage] = useState('')
+  const { selectedSite, selectedSiteId } = useSiteContext()
 
   useEffect(() => {
-    Promise.all([
-      apiRequest<Site[]>('/sites'),
-      apiRequest<Zone[]>('/zones'),
-      apiRequest<Rule[]>('/rules'),
-    ])
-      .then(([loadedSites, loadedZones, loadedRules]) => {
-        setSites(loadedSites)
+    if (!selectedSiteId) {
+      setZones([])
+      setRules([])
+      setForm((current) => ({ ...current, site_id: '', zone_id: '' }))
+      return
+    }
+
+    Promise.all([apiRequest<Zone[]>(withSiteId('/zones', selectedSiteId)), apiRequest<Rule[]>(withSiteId('/rules', selectedSiteId))])
+      .then(([loadedZones, loadedRules]) => {
         setZones(loadedZones)
         setRules(loadedRules)
-        if (loadedSites.length) {
-          const firstSiteId = loadedSites[0].id
-          setSelectedSiteId(firstSiteId)
-          const firstSiteZone = loadedZones.find((zone) => zone.site_id === firstSiteId)
-          setForm((current) => ({
-            ...current,
-            site_id: current.site_id || firstSiteId,
-            zone_id: current.zone_id || firstSiteZone?.id || '',
-          }))
-        }
+        const firstSiteZone = loadedZones[0]
+        setForm((current) => ({
+          ...current,
+          site_id: selectedSiteId,
+          zone_id: loadedZones.some((zone) => zone.id === current.zone_id) ? current.zone_id : (firstSiteZone?.id || ''),
+        }))
       })
       .catch((loadError) => {
         setError(loadError instanceof Error ? loadError.message : 'Unable to load rules.')
       })
-  }, [])
+  }, [selectedSiteId])
 
   const zonesById = useMemo(
     () =>
@@ -88,41 +87,22 @@ export function RulesPage() {
     [zones],
   )
 
-  const formZones = useMemo(
-    () => zones.filter((zone) => zone.site_id === form.site_id),
-    [form.site_id, zones],
-  )
-
-  const filteredRules = useMemo(
-    () => (selectedSiteId ? rules.filter((rule) => rule.site_id === selectedSiteId) : rules),
-    [rules, selectedSiteId],
-  )
+  const formZones = useMemo(() => zones, [zones])
 
   const selectedZone = form.zone_id ? zonesById[form.zone_id] : null
   const previewSummary = selectedZone
     ? form.posture
       ? `If ${form.entity_type} shows ${form.posture.replace(/_/g, ' ')} in ${selectedZone.name}, create ${form.severity} alert.`
       : `If ${form.entity_type} enters ${selectedZone.name}, create ${form.severity} alert.`
-    : 'Pick a site and zone to preview the rule.'
-
-  function handleFormSiteChange(siteId: string) {
-    const firstSiteZone = zones.find((zone) => zone.site_id === siteId)
-    setForm((current) => ({
-      ...current,
-      site_id: siteId,
-      zone_id: firstSiteZone?.id || '',
-    }))
-    setSaveMessage('')
-    setError('')
-  }
+    : 'Pick a zone to preview the rule.'
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
     setError('')
     setSaveMessage('')
 
-    if (!form.site_id) {
-      setError('Choose a site first.')
+    if (!selectedSiteId) {
+      setError('Choose a site in the header first.')
       return
     }
 
@@ -144,7 +124,7 @@ export function RulesPage() {
     }
 
     const payload = {
-      site_id: form.site_id,
+      site_id: selectedSiteId,
       applies_to_site_type: null,
       template_key: createTemplateKey(trimmedName, zone.id, form.entity_type, form.posture),
       name: trimmedName,
@@ -174,7 +154,6 @@ export function RulesPage() {
       })
       setRules((current) => [createdRule, ...current])
       setSaveMessage('Custom rule saved successfully.')
-      setSelectedSiteId(form.site_id)
       setForm((current) => ({
         ...current,
         name: '',
@@ -189,21 +168,14 @@ export function RulesPage() {
     <div className="page-grid page-grid--two-up">
       <Panel
         title="Create Custom Rule"
-        subtitle="Use the zones you already drew to say exactly who should trigger an alert in that area."
+        subtitle={
+          selectedSite
+            ? `Use the zones you already drew for ${selectedSite.name} to say exactly who should trigger an alert in that area.`
+            : 'Choose a site in the header to build rules for it.'
+        }
       >
         <form className="stack" onSubmit={handleSubmit}>
           <div className="rule-builder-grid">
-            <label className="field">
-              <span>Site</span>
-              <select value={form.site_id} onChange={(event) => handleFormSiteChange(event.target.value)}>
-                {sites.map((site) => (
-                  <option key={site.id} value={site.id}>
-                    {site.name}
-                  </option>
-                ))}
-              </select>
-            </label>
-
             <label className="field">
               <span>Zone</span>
               <select
@@ -299,7 +271,7 @@ export function RulesPage() {
           {error ? <p className="form-error">{error}</p> : null}
           {saveMessage ? <p className="form-success">{saveMessage}</p> : null}
 
-          <button className="primary-button" disabled={!sites.length || !formZones.length} type="submit">
+          <button className="primary-button" disabled={!selectedSiteId || !formZones.length} type="submit">
             Save custom rule
           </button>
         </form>
@@ -309,28 +281,11 @@ export function RulesPage() {
         title="Rules"
         subtitle="Default rules come from the site mode. Custom rules let you target exact zones like a specific smoking area or room."
       >
-        <div className="toolbar">
-          <label className="field field--inline">
-            <span>Filter by site</span>
-            <select
-              value={selectedSiteId}
-              onChange={(event) => setSelectedSiteId(event.target.value)}
-            >
-              <option value="">All sites</option>
-              {sites.map((site) => (
-                <option key={site.id} value={site.id}>
-                  {site.name}
-                </option>
-              ))}
-            </select>
-          </label>
-        </div>
-
         {error ? <p className="form-error">{error}</p> : null}
 
-        {filteredRules.length ? (
+        {rules.length ? (
           <div className="list">
-            {filteredRules.map((rule) => (
+            {rules.map((rule) => (
               <article key={rule.id} className="list-row list-row--top">
                 <div>
                   <strong>{rule.name}</strong>
@@ -345,7 +300,7 @@ export function RulesPage() {
             ))}
           </div>
         ) : (
-          <EmptyState message="No rules found yet. Create a site for defaults or save a custom rule here." />
+          <EmptyState message={selectedSite ? 'No rules found yet for this site. Save a custom rule here or rely on its defaults.' : 'Select a site to load its rules.'} />
         )}
       </Panel>
     </div>

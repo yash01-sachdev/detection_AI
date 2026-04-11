@@ -206,12 +206,40 @@ export type DashboardOverview = {
   recent_alerts: Alert[]
 }
 
+export type WorkerAssignment = {
+  id: string
+  worker_name: string
+  site_id: string | null
+  site_name: string | null
+  site_type: string | null
+  camera_id: string | null
+  camera_name: string | null
+  camera_source_type: string
+  camera_source: string
+  is_active: boolean
+  assignment_version: number
+  camera_connected: boolean
+  frame_count: number
+  last_detection_count: number
+  last_labels: string[]
+  message: string
+  frame_url: string | null
+  frame_updated_at: string | null
+  last_heartbeat_at: string | null
+}
+
 export type LiveMonitorStatus = {
   worker_name: string
+  assignment_active: boolean
+  site_id: string | null
+  site_name: string | null
+  camera_id: string | null
+  camera_name: string | null
   camera_source_type: string
   camera_source: string
   camera_connected: boolean
   frame_updated_at: string | null
+  last_heartbeat_at: string | null
   frame_count: number
   last_detection_count: number
   last_labels: string[]

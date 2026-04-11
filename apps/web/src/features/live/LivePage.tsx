@@ -3,9 +3,12 @@ import { useEffect, useMemo, useState } from 'react'
 import { Panel } from '../../components/shared/Panel'
 import { EmptyState } from '../../components/shared/EmptyState'
 import { API_BASE_URL, apiRequest } from '../../lib/api/client'
-import type { LiveMonitorStatus } from '../../types/models'
+import { withSiteId } from '../../lib/api/siteScope'
+import type { Camera, LiveMonitorStatus, WorkerAssignment } from '../../types/models'
+import { useSiteContext } from '../sites/SiteContext'
 
 const API_ROOT = API_BASE_URL.replace(/\/api\/v1\/?$/, '')
+const DEFAULT_WORKER_NAME = 'detection-ai-worker'
 
 function formatTimestamp(value: string | null) {
   if (!value) {
@@ -17,14 +20,24 @@ function formatTimestamp(value: string | null) {
 
 export function LivePage() {
   const [status, setStatus] = useState<LiveMonitorStatus | null>(null)
+  const [cameras, setCameras] = useState<Camera[]>([])
+  const [assignments, setAssignments] = useState<WorkerAssignment[]>([])
+  const [activeCameraId, setActiveCameraId] = useState('')
   const [error, setError] = useState('')
+  const [saveMessage, setSaveMessage] = useState('')
+  const { selectedSite, selectedSiteId } = useSiteContext()
 
   useEffect(() => {
+    if (!selectedSiteId) {
+      setStatus(null)
+      return
+    }
+
     let isMounted = true
 
     async function loadStatus() {
       try {
-        const nextStatus = await apiRequest<LiveMonitorStatus>('/live/status')
+        const nextStatus = await apiRequest<LiveMonitorStatus>(withSiteId('/live/status', selectedSiteId))
         if (!isMounted) {
           return
         }
@@ -45,7 +58,37 @@ export function LivePage() {
       isMounted = false
       window.clearInterval(intervalId)
     }
-  }, [])
+  }, [selectedSiteId])
+
+  useEffect(() => {
+    if (!selectedSiteId) {
+      setCameras([])
+      setAssignments([])
+      setActiveCameraId('')
+      setSaveMessage('')
+      return
+    }
+
+    Promise.all([
+      apiRequest<Camera[]>(withSiteId('/cameras', selectedSiteId)),
+      apiRequest<WorkerAssignment[]>('/worker-assignments'),
+    ])
+      .then(([loadedCameras, loadedAssignments]) => {
+        setCameras(loadedCameras)
+        setAssignments(loadedAssignments)
+        const activeAssignment =
+          loadedAssignments.find((assignment) => assignment.worker_name === DEFAULT_WORKER_NAME) ??
+          loadedAssignments[0]
+        const nextCameraId =
+          activeAssignment?.site_id === selectedSiteId && activeAssignment.camera_id
+            ? activeAssignment.camera_id
+            : (loadedCameras[0]?.id ?? '')
+        setActiveCameraId(nextCameraId)
+      })
+      .catch((loadError) => {
+        setError(loadError instanceof Error ? loadError.message : 'Unable to load worker assignment details.')
+      })
+  }, [selectedSiteId])
 
   const frameUrl = useMemo(() => {
     if (!status?.frame_url) {
@@ -56,11 +99,53 @@ export function LivePage() {
     return `${API_ROOT}${status.frame_url}?t=${cacheKey}`
   }, [status])
 
+  const activeWorkerName = useMemo(() => {
+    if (status?.worker_name) {
+      return status.worker_name
+    }
+    return assignments.find((assignment) => assignment.worker_name === DEFAULT_WORKER_NAME)?.worker_name
+      ?? DEFAULT_WORKER_NAME
+  }, [assignments, status])
+
+  async function handleAssignWorker() {
+    if (!selectedSiteId || !activeCameraId) {
+      setError('Choose a site and camera first.')
+      return
+    }
+
+    setError('')
+    setSaveMessage('')
+
+    try {
+      const updatedAssignment = await apiRequest<WorkerAssignment>(`/worker-assignments/${activeWorkerName}`, {
+        method: 'PUT',
+        body: JSON.stringify({
+          site_id: selectedSiteId,
+          camera_id: activeCameraId,
+          is_active: true,
+        }),
+      })
+      setAssignments((current) => {
+        const remaining = current.filter((assignment) => assignment.worker_name !== updatedAssignment.worker_name)
+        return [updatedAssignment, ...remaining]
+      })
+      setSaveMessage(`Worker ${updatedAssignment.worker_name} is now assigned to ${selectedSite?.name || 'the selected site'}.`)
+      const nextStatus = await apiRequest<LiveMonitorStatus>(withSiteId('/live/status', selectedSiteId))
+      setStatus(nextStatus)
+    } catch (submissionError) {
+      setError(submissionError instanceof Error ? submissionError.message : 'Unable to assign worker.')
+    }
+  }
+
   return (
     <div className="page-grid page-grid--two-up">
       <Panel
         title="Live Camera Monitor"
-        subtitle="This is the easiest testing surface: make the camera show you or your room, then watch this preview refresh about once a second."
+        subtitle={
+          selectedSite
+            ? `This is the easiest testing surface for ${selectedSite.name}: make the camera show you or your room, then watch this preview refresh about once a second.`
+            : 'Pick a site in the header to load the live camera monitor.'
+        }
       >
         {error ? <p className="form-error">{error}</p> : null}
         {frameUrl ? (
@@ -69,7 +154,7 @@ export function LivePage() {
             <p className="eyebrow">Last frame: {formatTimestamp(status?.frame_updated_at ?? null)}</p>
           </div>
         ) : (
-          <EmptyState message="No preview frame yet. Start the worker and point it at a webcam or DroidCam source." />
+          <EmptyState message={selectedSite ? 'No preview frame yet. Start the worker and point it at the assigned source.' : 'Select a site to load the live preview.'} />
         )}
       </Panel>
 
@@ -77,6 +162,35 @@ export function LivePage() {
         title="Live Status"
         subtitle="Use this to confirm the worker source before worrying about rules or alerts."
       >
+        <article className="list-row list-row--top">
+          <div>
+            <strong>Worker Assignment</strong>
+            <p>
+              {selectedSite
+                ? `Point ${activeWorkerName} at one camera from ${selectedSite.name}.`
+                : 'Choose a site first, then assign the worker to one of its cameras.'}
+            </p>
+            <small>
+              Current assignment: {status?.site_name || 'none'} / {status?.camera_name || 'no camera selected'}
+            </small>
+          </div>
+          <div className="stack-sm align-end">
+            <select value={activeCameraId} onChange={(event) => setActiveCameraId(event.target.value)} disabled={!cameras.length}>
+              <option value="">{cameras.length ? 'Select camera' : 'No cameras for this site'}</option>
+              {cameras.map((camera) => (
+                <option key={camera.id} value={camera.id}>
+                  {camera.name} ({camera.source_type})
+                </option>
+              ))}
+            </select>
+            <button className="ghost-button" type="button" onClick={handleAssignWorker} disabled={!selectedSiteId || !activeCameraId}>
+              Assign worker
+            </button>
+          </div>
+        </article>
+
+        {saveMessage ? <p className="form-success">{saveMessage}</p> : null}
+
         <div className="info-grid">
           <article className="info-tile">
             <small>Worker</small>
@@ -95,6 +209,10 @@ export function LivePage() {
           <article className="info-tile">
             <small>Last detection count</small>
             <strong>{status?.last_detection_count ?? 0}</strong>
+          </article>
+          <article className="info-tile">
+            <small>Heartbeat</small>
+            <strong>{formatTimestamp(status?.last_heartbeat_at ?? null)}</strong>
           </article>
         </div>
 
@@ -123,10 +241,10 @@ export function LivePage() {
         </div>
 
         <ol className="instruction-list">
-          <li>Open DroidCam on your phone and make sure the phone camera is sending video to the laptop.</li>
-          <li>Point the phone at yourself or a room entrance until the preview image here looks normal.</li>
-          <li>Walk into frame and check whether the detection count rises above zero.</li>
-          <li>Then open Alerts to see whether a saved alert was created.</li>
+          <li>Choose the site you want to monitor from the header.</li>
+          <li>Pick one camera for that site and press Assign worker.</li>
+          <li>Point the camera at yourself or the scene until the preview looks normal.</li>
+          <li>Then open Alerts to confirm the selected site's rules react correctly.</li>
         </ol>
       </Panel>
     </div>

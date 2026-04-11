@@ -21,4 +21,4 @@ class Camera(UUIDMixin, TimestampMixin, Base):
     site = relationship("Site", back_populates="cameras")
     alerts = relationship("Alert", back_populates="camera")
     events = relationship("Event", back_populates="camera")
-
+    worker_assignments = relationship("WorkerAssignment", back_populates="camera")

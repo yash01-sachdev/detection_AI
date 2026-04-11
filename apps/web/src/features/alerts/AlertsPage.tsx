@@ -11,20 +11,28 @@ import {
   getAlertZoneName,
 } from '../../lib/alertPresentation'
 import { API_BASE_URL, apiRequest } from '../../lib/api/client'
+import { withSiteId } from '../../lib/api/siteScope'
 import type { Alert } from '../../types/models'
+import { useSiteContext } from '../sites/SiteContext'
 
 const API_ROOT = API_BASE_URL.replace(/\/api\/v1\/?$/, '')
 
 export function AlertsPage() {
   const [alerts, setAlerts] = useState<Alert[]>([])
   const [error, setError] = useState('')
+  const { selectedSite, selectedSiteId } = useSiteContext()
 
   useEffect(() => {
+    if (!selectedSiteId) {
+      setAlerts([])
+      return
+    }
+
     let isMounted = true
 
     async function loadAlerts() {
       try {
-        const nextAlerts = await apiRequest<Alert[]>('/alerts')
+        const nextAlerts = await apiRequest<Alert[]>(withSiteId('/alerts', selectedSiteId))
         if (!isMounted) {
           return
         }
@@ -45,12 +53,16 @@ export function AlertsPage() {
       isMounted = false
       window.clearInterval(intervalId)
     }
-  }, [])
+  }, [selectedSiteId])
 
   return (
     <Panel
       title="Alert History"
-      subtitle="This feed shows the latest incidents, folds repeated sightings into one alert, and keeps the newest evidence on top."
+      subtitle={
+        selectedSite
+          ? `This feed shows the latest incidents for ${selectedSite.name}, folds repeated sightings into one alert, and keeps the newest evidence on top.`
+          : 'Pick a site in the header to load its alerts.'
+      }
     >
       {error ? <p className="form-error">{error}</p> : null}
       {alerts.length ? (
@@ -95,7 +107,7 @@ export function AlertsPage() {
           })}
         </div>
       ) : (
-        <EmptyState message="No alerts recorded yet." />
+        <EmptyState message={selectedSite ? 'No alerts recorded yet for this site.' : 'Select a site to load alerts.'} />
       )}
     </Panel>
   )
