@@ -87,13 +87,15 @@ def _remove_legacy_fall_rules() -> None:
         return
 
     with engine.begin() as connection:
-        connection.execute(
-            text(
-                """
-                DELETE FROM rules
-                WHERE template_key = 'office_fall_detection'
-                   OR conditions LIKE '%"posture": "fallen"%'
-                   OR conditions LIKE '%"posture":"fallen"%'
-                """
-            )
-        )
+        connection.execute(_legacy_fall_rule_cleanup_statement())
+
+
+def _legacy_fall_rule_cleanup_statement():
+    return text(
+        """
+        DELETE FROM rules
+        WHERE template_key = 'office_fall_detection'
+           OR CAST(conditions AS TEXT) LIKE '%"posture": "fallen"%'
+           OR CAST(conditions AS TEXT) LIKE '%"posture":"fallen"%'
+        """
+    )

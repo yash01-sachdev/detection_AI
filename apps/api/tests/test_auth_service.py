@@ -7,6 +7,7 @@ from sqlalchemy import create_engine, select
 from sqlalchemy.orm import sessionmaker
 
 from app.db.base import Base
+from app.main import _legacy_fall_rule_cleanup_statement
 from app.models.enums import UserRole
 from app.models.user import User
 from app.schemas.auth import AdminCreateRequest
@@ -74,6 +75,11 @@ class AuthServiceTests(unittest.TestCase):
                 )
 
             self.assertEqual(409, error.exception.status_code)
+
+    def test_legacy_fall_rule_cleanup_casts_conditions_to_text(self) -> None:
+        statement_sql = str(_legacy_fall_rule_cleanup_statement())
+
+        self.assertIn("CAST(conditions AS TEXT)", statement_sql)
 
 
 if __name__ == "__main__":
