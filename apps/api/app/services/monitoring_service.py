@@ -1,16 +1,19 @@
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
-from sqlalchemy import func, select
+from sqlalchemy import delete, false, func, select, update
 from sqlalchemy.orm import Session
 
+from app.models.camera import Camera
 from app.core.config import get_settings
 from app.models.alert import Alert
-from app.models.camera import Camera
+from app.models.employee import Employee
 from app.models.enums import AlertStatus, RuleSeverity, SiteType
 from app.models.event import Event
+from app.models.known_person import KnownPerson
 from app.models.rule import Rule
 from app.models.site import Site
+from app.models.worker_assignment import WorkerAssignment
 from app.models.zone import Zone
 from app.schemas.monitoring import (
     DashboardOverview,
@@ -153,6 +156,51 @@ def create_site_with_default_rules(db: Session, payload: SiteCreate) -> Site:
     db.commit()
     db.refresh(site)
     return site
+
+
+def delete_site_and_related_data(db: Session, site_id: str) -> None:
+    site = db.get(Site, site_id)
+    if site is None:
+        raise ValueError("Site not found.")
+
+    site_camera_ids = list(
+        db.scalars(
+            select(Camera.id).where(Camera.site_id == site_id)
+        )
+    )
+
+    db.execute(
+        update(WorkerAssignment)
+        .where(
+            (WorkerAssignment.site_id == site_id)
+            | (WorkerAssignment.camera_id.in_(site_camera_ids) if site_camera_ids else false())
+        )
+        .values(
+            site_id=None,
+            camera_id=None,
+            is_active=False,
+            assignment_version=WorkerAssignment.assignment_version + 1,
+            camera_connected=False,
+            reported_camera_source_type="",
+            reported_camera_source="",
+            frame_count=0,
+            last_detection_count=0,
+            last_labels=[],
+            message="Site was deleted. Assign a new site and camera.",
+            frame_path=None,
+            frame_updated_at=None,
+        )
+    )
+
+    db.execute(delete(Alert).where(Alert.site_id == site_id))
+    db.execute(delete(Event).where(Event.site_id == site_id))
+    db.execute(delete(Rule).where(Rule.site_id == site_id))
+    db.execute(delete(Zone).where(Zone.site_id == site_id))
+    db.execute(delete(Camera).where(Camera.site_id == site_id))
+    db.execute(delete(KnownPerson).where(KnownPerson.site_id == site_id))
+    db.execute(delete(Employee).where(Employee.site_id == site_id))
+    db.delete(site)
+    db.commit()
 
 
 def build_dashboard_overview(db: Session, site_id: str | None = None) -> DashboardOverview:

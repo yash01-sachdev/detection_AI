@@ -17,11 +17,13 @@ const initialForm = {
 export function SitesPage() {
   const [form, setForm] = useState(initialForm)
   const [error, setError] = useState('')
+  const [saveMessage, setSaveMessage] = useState('')
   const { sites, refreshSites, setSelectedSiteId } = useSiteContext()
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
     setError('')
+    setSaveMessage('')
 
     try {
       const createdSite = await apiRequest<Site>('/sites', {
@@ -31,11 +33,36 @@ export function SitesPage() {
       await refreshSites(createdSite.id)
       setSelectedSiteId(createdSite.id)
       setForm(initialForm)
+      setSaveMessage(`Created site ${createdSite.name}.`)
     } catch (submissionError) {
       setError(
         submissionError instanceof Error
           ? submissionError.message
           : 'Unable to create site.',
+      )
+    }
+  }
+
+  async function handleDeleteSite(site: Site) {
+    const shouldDelete = window.confirm(
+      `Delete ${site.name}? This will remove its cameras, zones, rules, alerts, events, and people.`,
+    )
+    if (!shouldDelete) {
+      return
+    }
+
+    setError('')
+    setSaveMessage('')
+
+    try {
+      await apiRequest<void>(`/sites/${site.id}`, { method: 'DELETE' })
+      await refreshSites()
+      setSaveMessage(`Deleted site ${site.name}.`)
+    } catch (deleteError) {
+      setError(
+        deleteError instanceof Error
+          ? deleteError.message
+          : 'Unable to delete site.',
       )
     }
   }
@@ -92,6 +119,7 @@ export function SitesPage() {
             />
           </label>
           {error ? <p className="form-error">{error}</p> : null}
+          {saveMessage ? <p className="form-success">{saveMessage}</p> : null}
           <button className="primary-button" type="submit">
             Create site
           </button>
@@ -113,6 +141,13 @@ export function SitesPage() {
                 <div className="stack-sm align-end">
                   <span className="pill">{site.site_type}</span>
                   <small>{site.timezone}</small>
+                  <button
+                    className="ghost-button"
+                    type="button"
+                    onClick={() => void handleDeleteSite(site)}
+                  >
+                    Delete site
+                  </button>
                 </div>
               </article>
             ))}

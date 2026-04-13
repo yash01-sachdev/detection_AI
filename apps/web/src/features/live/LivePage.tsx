@@ -4,7 +4,7 @@ import { Panel } from '../../components/shared/Panel'
 import { EmptyState } from '../../components/shared/EmptyState'
 import { API_BASE_URL, apiRequest } from '../../lib/api/client'
 import { withSiteId } from '../../lib/api/siteScope'
-import type { Camera, LiveMonitorStatus, WorkerAssignment } from '../../types/models'
+import type { Camera, LiveMonitorStatus, WorkerAssignment, Zone } from '../../types/models'
 import { useSiteContext } from '../sites/SiteContext'
 
 const API_ROOT = API_BASE_URL.replace(/\/api\/v1\/?$/, '')
@@ -22,6 +22,7 @@ export function LivePage() {
   const [status, setStatus] = useState<LiveMonitorStatus | null>(null)
   const [cameras, setCameras] = useState<Camera[]>([])
   const [assignments, setAssignments] = useState<WorkerAssignment[]>([])
+  const [zones, setZones] = useState<Zone[]>([])
   const [activeCameraId, setActiveCameraId] = useState('')
   const [error, setError] = useState('')
   const [saveMessage, setSaveMessage] = useState('')
@@ -64,6 +65,7 @@ export function LivePage() {
     if (!selectedSiteId) {
       setCameras([])
       setAssignments([])
+      setZones([])
       setActiveCameraId('')
       setSaveMessage('')
       return
@@ -71,10 +73,12 @@ export function LivePage() {
 
     Promise.all([
       apiRequest<Camera[]>(withSiteId('/cameras', selectedSiteId)),
+      apiRequest<Zone[]>(withSiteId('/zones', selectedSiteId)),
       apiRequest<WorkerAssignment[]>('/worker-assignments'),
     ])
-      .then(([loadedCameras, loadedAssignments]) => {
+      .then(([loadedCameras, loadedZones, loadedAssignments]) => {
         setCameras(loadedCameras)
+        setZones(loadedZones)
         setAssignments(loadedAssignments)
         const activeAssignment =
           loadedAssignments.find((assignment) => assignment.worker_name === DEFAULT_WORKER_NAME) ??
@@ -106,6 +110,19 @@ export function LivePage() {
     return assignments.find((assignment) => assignment.worker_name === DEFAULT_WORKER_NAME)?.worker_name
       ?? DEFAULT_WORKER_NAME
   }, [assignments, status])
+
+  const zoneHint = useMemo(() => {
+    if (!selectedSite) {
+      return ''
+    }
+    if (!zones.length) {
+      return 'No zones configured yet. Detections can appear in Live without creating alerts until you add zones.'
+    }
+    if (selectedSite.site_type === 'home' && !zones.some((zone) => zone.zone_type === 'entry')) {
+      return 'Home alerts only fire inside an entry zone. Add a gate/entry polygon to trigger Unknown Person At Gate.'
+    }
+    return ''
+  }, [selectedSite, zones])
 
   async function handleAssignWorker() {
     if (!selectedSiteId || !activeCameraId) {
@@ -190,6 +207,7 @@ export function LivePage() {
         </article>
 
         {saveMessage ? <p className="form-success">{saveMessage}</p> : null}
+        {zoneHint ? <p className="form-error">{zoneHint}</p> : null}
 
         <div className="info-grid">
           <article className="info-tile">

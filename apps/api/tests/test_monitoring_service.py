@@ -5,11 +5,13 @@ from sqlalchemy import create_engine, select
 from sqlalchemy.orm import sessionmaker
 
 from app.db.base import Base
-from app.models import Alert, Camera, Event, Rule, Zone
+from app.models import Alert, Camera, Employee, Event, KnownPerson, Rule, Site, Zone
 from app.models.enums import CameraSourceType, EntityType, SiteType, ZoneType
-from app.schemas.monitoring import DetectionIngestRequest, SiteCreate
+from app.schemas.monitoring import DetectionIngestRequest, EmployeeCreate, KnownPersonCreate, SiteCreate
 from app.services.auth_service import bootstrap_default_admin
-from app.services.monitoring_service import create_site_with_default_rules, ingest_detection_event
+from app.services.employee_service import create_employee
+from app.services.known_person_service import create_known_person
+from app.services.monitoring_service import create_site_with_default_rules, delete_site_and_related_data, ingest_detection_event
 
 
 class MonitoringServiceTests(unittest.TestCase):
@@ -96,6 +98,81 @@ class MonitoringServiceTests(unittest.TestCase):
                 "office_head_down_watch",
             },
         )
+
+    def test_delete_site_removes_related_monitoring_data(self) -> None:
+        with self.SessionLocal() as db:
+            bootstrap_default_admin(db)
+            site = create_site_with_default_rules(
+                db,
+                SiteCreate(
+                    name="Delete Test Site",
+                    site_type=SiteType.home,
+                    timezone="Asia/Calcutta",
+                    description="Delete me",
+                ),
+            )
+            camera = Camera(
+                site_id=site.id,
+                name="Delete Cam",
+                source_type=CameraSourceType.webcam,
+                source_value="1",
+                is_enabled=True,
+            )
+            zone = Zone(
+                site_id=site.id,
+                name="Front Gate",
+                zone_type=ZoneType.entry,
+                color="#148A72",
+                is_restricted=False,
+                points=[
+                    {"x": 0.0, "y": 0.0},
+                    {"x": 640.0, "y": 0.0},
+                    {"x": 640.0, "y": 480.0},
+                    {"x": 0.0, "y": 480.0},
+                ],
+            )
+            db.add_all([camera, zone])
+            db.flush()
+            create_known_person(
+                db,
+                KnownPersonCreate(
+                    site_id=site.id,
+                    display_name="Resident One",
+                    notes="Test resident",
+                ),
+            )
+            create_employee(
+                db,
+                EmployeeCreate(
+                    site_id=site.id,
+                    employee_code="EMP-DELETE",
+                    first_name="Delete",
+                    last_name="Me",
+                    role_title="Tester",
+                    is_active=True,
+                    shift_name="Day Shift",
+                    shift_start_time="09:00",
+                    shift_end_time="17:00",
+                    shift_grace_minutes=10,
+                    shift_days=["mon", "tue", "wed", "thu", "fri"],
+                ),
+            )
+
+            delete_site_and_related_data(db, site.id)
+
+            remaining_site = db.get(Site, site.id)
+            remaining_cameras = list(db.scalars(select(Camera).where(Camera.site_id == site.id)))
+            remaining_rules = list(db.scalars(select(Rule).where(Rule.site_id == site.id)))
+            remaining_zones = list(db.scalars(select(Zone).where(Zone.site_id == site.id)))
+            remaining_known_people = list(db.scalars(select(KnownPerson).where(KnownPerson.site_id == site.id)))
+            remaining_employees = list(db.scalars(select(Employee).where(Employee.site_id == site.id)))
+
+        self.assertIsNone(remaining_site)
+        self.assertEqual([], remaining_cameras)
+        self.assertEqual([], remaining_rules)
+        self.assertEqual([], remaining_zones)
+        self.assertEqual([], remaining_known_people)
+        self.assertEqual([], remaining_employees)
 
     def test_ingest_restricted_zone_creates_rule_based_alert(self) -> None:
         site, camera, zone = self._create_site_camera_zone(

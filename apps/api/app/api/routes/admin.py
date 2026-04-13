@@ -55,6 +55,7 @@ from app.services.employee_service import (
 from app.services.monitoring_service import (
     build_dashboard_overview,
     create_site_with_default_rules,
+    delete_site_and_related_data,
     list_mode_templates,
 )
 from app.services.worker_service import build_live_status, list_worker_assignments, upsert_worker_assignment
@@ -99,6 +100,18 @@ def create_site(
     _: object = Depends(require_admin),
 ) -> Site:
     return create_site_with_default_rules(db, payload)
+
+
+@router.delete("/sites/{site_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_site(
+    site_id: str,
+    db: Session = Depends(get_db),
+    _: object = Depends(require_admin),
+) -> None:
+    try:
+        delete_site_and_related_data(db, site_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
 
 
 @router.get("/cameras", response_model=list[CameraRead])

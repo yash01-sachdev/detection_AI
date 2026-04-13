@@ -347,7 +347,7 @@ class MonitoringPipeline:
 
     def _refresh_zones(self, force: bool = False) -> None:
         now = monotonic()
-        if not force and now - self.last_zone_refresh_at < 15:
+        if not force and now - self.last_zone_refresh_at < 5:
             return
 
         try:
