@@ -22,9 +22,11 @@ const AuthContext = createContext<AuthContextValue | undefined>(undefined)
 const STORAGE_KEY = 'detection-ai-token'
 
 export function AuthProvider({ children }: { children: ReactNode }) {
-  const [token, setToken] = useState<string | null>(() =>
-    window.localStorage.getItem(STORAGE_KEY),
-  )
+  const [token, setToken] = useState<string | null>(() => {
+    const storedToken = window.localStorage.getItem(STORAGE_KEY)
+    setAuthToken(storedToken)
+    return storedToken
+  })
   const [user, setUser] = useState<User | null>(null)
   const isLoading = Boolean(token) && user === null
 
@@ -63,12 +65,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       skipAuth: true,
     })
 
+    setAuthToken(response.access_token)
     window.localStorage.setItem(STORAGE_KEY, response.access_token)
     setToken(response.access_token)
   }
 
   function logout() {
     window.localStorage.removeItem(STORAGE_KEY)
+    setAuthToken(null)
     setToken(null)
     setUser(null)
   }
