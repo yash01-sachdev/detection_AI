@@ -113,6 +113,46 @@ class WorkerServiceTests(unittest.TestCase):
         self.assertEqual(status.frame_url, "/live-media/detection-ai-worker/latest_frame.jpg")
         self.assertTrue(frame_exists)
 
+    def test_status_heartbeat_without_frame_timestamp_keeps_last_uploaded_frame(self) -> None:
+        site_id, camera_id = self._create_site_and_camera()
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            with patch("app.services.worker_service.live_root", temp_path / "live"):
+                with self.SessionLocal() as db:
+                    assignment = upsert_worker_assignment(
+                        db,
+                        "detection-ai-worker",
+                        WorkerAssignmentUpdate(site_id=site_id, camera_id=camera_id, is_active=True),
+                    )
+                    save_worker_live_frame(
+                        db,
+                        "detection-ai-worker",
+                        assignment.assignment_version,
+                        b"fake-jpeg-content",
+                    )
+                    first_status = build_live_status(db, site_id=site_id)
+
+                    record_worker_status(
+                        db,
+                        "detection-ai-worker",
+                        WorkerStatusUpdate(
+                            assignment_version=assignment.assignment_version,
+                            camera_connected=True,
+                            camera_source_type="webcam",
+                            camera_source="1",
+                            frame_count=43,
+                            last_detection_count=1,
+                            last_labels=["yash sachdev @ entry"],
+                            message="Detections found in the current frame.",
+                        ),
+                    )
+                    second_status = build_live_status(db, site_id=site_id)
+
+        self.assertIsNotNone(first_status.frame_updated_at)
+        self.assertEqual(first_status.frame_updated_at, second_status.frame_updated_at)
+        self.assertEqual(second_status.frame_url, "/live-media/detection-ai-worker/latest_frame.jpg")
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -437,14 +437,16 @@ class MonitoringPipeline:
         if detections:
             message = "Detections found in the current frame."
 
+        published_frame_at = self._publish_live_frame_if_due()
         self._write_status(
             camera_connected=True,
             frame_count=frame_count,
             last_detection_count=len(detections),
             last_labels=labels,
             message=message,
+            publish_remote=published_frame_at is not None,
+            frame_updated_at=published_frame_at,
         )
-        self._publish_live_frame_if_due()
 
     def _assign_presence_sessions(self, detections: list[Detection]) -> list[Detection]:
         if not detections:
@@ -633,14 +635,17 @@ class MonitoringPipeline:
         last_labels: list[str],
         message: str,
         force_publish: bool = False,
+        publish_remote: bool = True,
+        frame_updated_at: datetime | None = None,
     ) -> None:
         now = monotonic()
+        local_frame_updated_at = frame_updated_at or datetime.now(UTC)
         payload = {
             "worker_name": self.worker_name,
             "camera_source_type": self.camera_source_type,
             "camera_source": self.camera_source,
             "camera_connected": camera_connected,
-            "frame_updated_at": datetime.now(UTC).isoformat(),
+            "frame_updated_at": local_frame_updated_at.isoformat(),
             "frame_count": frame_count,
             "last_detection_count": last_detection_count,
             "last_labels": last_labels,
@@ -650,7 +655,7 @@ class MonitoringPipeline:
             json.dumps(payload, indent=2),
             encoding="utf-8",
         )
-        if force_publish or now - self.last_status_publish_at >= self.status_publish_seconds:
+        if publish_remote and (force_publish or now - self.last_status_publish_at >= self.status_publish_seconds):
             try:
                 self.api_client.publish_worker_status(
                     camera_connected=camera_connected,
@@ -660,6 +665,7 @@ class MonitoringPipeline:
                     last_detection_count=last_detection_count,
                     last_labels=last_labels,
                     message=message,
+                    frame_updated_at=frame_updated_at.isoformat() if frame_updated_at is not None else None,
                 )
                 self.last_status_publish_at = now
             except Exception as exc:  # pragma: no cover
@@ -709,16 +715,18 @@ class MonitoringPipeline:
             return None
         return uploaded_path or None
 
-    def _publish_live_frame_if_due(self) -> None:
+    def _publish_live_frame_if_due(self) -> datetime | None:
         now = monotonic()
         if now - self.last_live_upload_at < self.live_frame_upload_seconds:
-            return
+            return None
 
         try:
             self.api_client.upload_live_frame(str(self.preview_frame_path))
             self.last_live_upload_at = now
+            return datetime.now(UTC)
         except Exception as exc:  # pragma: no cover
             logger.warning("Failed to upload live frame: %s", exc)
+            return None
 
     def _poll_assignment(
         self,

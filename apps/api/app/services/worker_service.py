@@ -104,7 +104,8 @@ def record_worker_status(
     assignment.last_detection_count = payload.last_detection_count
     assignment.last_labels = payload.last_labels
     assignment.message = payload.message
-    assignment.frame_updated_at = payload.frame_updated_at
+    if payload.frame_updated_at is not None:
+        assignment.frame_updated_at = payload.frame_updated_at
     assignment.last_heartbeat_at = datetime.now(UTC)
 
     db.commit()

@@ -130,6 +130,7 @@ class ApiClient:
         last_detection_count: int,
         last_labels: list[str],
         message: str,
+        frame_updated_at: str | None = None,
     ) -> None:
         assignment = self.runtime_assignment
         if assignment is None:
@@ -144,6 +145,7 @@ class ApiClient:
             "last_detection_count": last_detection_count,
             "last_labels": last_labels,
             "message": message,
+            "frame_updated_at": frame_updated_at,
         }
         with httpx.Client(timeout=10.0) as client:
             response = client.post(
