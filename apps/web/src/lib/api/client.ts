@@ -1,6 +1,8 @@
 export const API_BASE_URL =
   import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:8000/api/v1'
 
+export const DEMO_NOTICE_EVENT = 'detection-ai:demo-restriction'
+
 let authToken: string | null = null
 
 export function setAuthToken(token: string | null) {
@@ -20,10 +22,36 @@ async function extractError(response: Response) {
   }
 }
 
+function announceDemoRestriction(message: string) {
+  if (typeof window === 'undefined') {
+    return
+  }
+
+  window.dispatchEvent(
+    new CustomEvent(DEMO_NOTICE_EVENT, {
+      detail: { message },
+    }),
+  )
+}
+
 export async function apiRequest<T>(
   path: string,
   options: RequestOptions = {},
 ): Promise<T> {
+  const method = (options.method ?? 'GET').toUpperCase()
+
+  if (!authToken && !options.skipAuth) {
+    const { getDemoApiResponse, getDemoRestrictionMessage } = await import('../demo')
+
+    if (method === 'GET') {
+      return getDemoApiResponse<T>(path)
+    }
+
+    const message = getDemoRestrictionMessage(path, method)
+    announceDemoRestriction(message)
+    throw new Error(message)
+  }
+
   const headers = new Headers(options.headers)
   const isFormData = options.body instanceof FormData
 

@@ -14,6 +14,7 @@ type AuthContextValue = {
   user: User | null
   token: string | null
   isLoading: boolean
+  isDemoMode: boolean
   login: (email: string, password: string) => Promise<void>
   logout: () => void
 }
@@ -29,6 +30,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   })
   const [user, setUser] = useState<User | null>(null)
   const isLoading = Boolean(token) && user === null
+  const isDemoMode = !token
 
   useEffect(() => {
     setAuthToken(token)
@@ -81,6 +83,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     user,
     token,
     isLoading,
+    isDemoMode,
     login,
     logout,
   }

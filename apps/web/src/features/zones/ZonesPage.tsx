@@ -3,12 +3,11 @@ import type { FormEvent, MouseEvent } from 'react'
 
 import { EmptyState } from '../../components/shared/EmptyState'
 import { Panel } from '../../components/shared/Panel'
-import { API_BASE_URL, apiRequest } from '../../lib/api/client'
+import { apiRequest } from '../../lib/api/client'
 import { withSiteId } from '../../lib/api/siteScope'
+import { resolveMediaUrl } from '../../lib/media'
 import type { LiveMonitorStatus, Zone, ZonePoint } from '../../types/models'
 import { useSiteContext } from '../sites/SiteContext'
-
-const API_ROOT = API_BASE_URL.replace(/\/api\/v1\/?$/, '')
 
 const initialForm = {
   site_id: '',
@@ -64,8 +63,7 @@ function buildFrameUrl(status: LiveMonitorStatus | null) {
     return ''
   }
 
-  const cacheKey = encodeURIComponent(status.frame_updated_at ?? 'latest')
-  return `${API_ROOT}${status.frame_url}?t=${cacheKey}`
+  return resolveMediaUrl(status.frame_url, status.frame_updated_at ?? 'latest')
 }
 
 function suggestRestriction(zoneType: string) {

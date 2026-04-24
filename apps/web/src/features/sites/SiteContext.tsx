@@ -19,17 +19,12 @@ const STORAGE_KEY = 'detection-ai-selected-site'
 const SiteContext = createContext<SiteContextValue | undefined>(undefined)
 
 export function SiteProvider({ children }: { children: ReactNode }) {
-  const { token, isLoading: isAuthLoading } = useAuth()
+  const { isDemoMode, token, isLoading: isAuthLoading } = useAuth()
   const [sites, setSites] = useState<Site[]>([])
   const [selectedSiteId, setSelectedSiteIdState] = useState<string>(() => window.localStorage.getItem(STORAGE_KEY) ?? '')
   const [isLoading, setIsLoading] = useState(false)
 
   async function refreshSites(preferredSiteId?: string) {
-    if (!token) {
-      setSites([])
-      setSelectedSiteIdState('')
-      return
-    }
     if (isAuthLoading) {
       return
     }
@@ -48,19 +43,12 @@ export function SiteProvider({ children }: { children: ReactNode }) {
   }
 
   useEffect(() => {
-    if (!token) {
-      setSites([])
-      setSelectedSiteIdState('')
-      window.localStorage.removeItem(STORAGE_KEY)
-      return
-    }
-
     if (isAuthLoading) {
       return
     }
 
     void refreshSites().catch(() => undefined)
-  }, [isAuthLoading, token])
+  }, [isAuthLoading, isDemoMode, token])
 
   useEffect(() => {
     if (selectedSiteId) {

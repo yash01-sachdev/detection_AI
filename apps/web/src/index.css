@@ -144,6 +144,68 @@ a {
   backdrop-filter: blur(18px);
 }
 
+.demo-banner {
+  margin: 1.5rem 2rem 0;
+  padding: 1.2rem 1.3rem;
+  border-radius: 1.4rem;
+  border: 1px solid rgba(227, 163, 77, 0.32);
+  background:
+    radial-gradient(circle at top right, rgba(227, 163, 77, 0.16), transparent 26%),
+    rgba(16, 24, 25, 0.9);
+  box-shadow: var(--shadow);
+}
+
+.demo-banner__header,
+.demo-banner__grid {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.demo-banner__header h2,
+.demo-banner__card strong {
+  margin: 0;
+}
+
+.demo-banner__copy,
+.demo-banner__card p,
+.demo-banner__notice {
+  margin: 0;
+  color: var(--muted);
+}
+
+.demo-banner__copy {
+  margin-top: 0.5rem;
+}
+
+.demo-banner__grid {
+  margin-top: 1rem;
+  align-items: stretch;
+}
+
+.demo-banner__card {
+  flex: 1;
+  padding: 0.95rem 1rem;
+  border-radius: 1rem;
+  border: 1px solid var(--border);
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.demo-banner__card strong {
+  display: block;
+  margin-bottom: 0.35rem;
+}
+
+.demo-banner__notice {
+  margin-top: 1rem;
+  padding: 0.95rem 1rem;
+  border-radius: 1rem;
+  border: 1px solid rgba(220, 108, 85, 0.32);
+  background: rgba(220, 108, 85, 0.08);
+  color: #ffd2c8;
+}
+
 .page-header h1,
 .panel h2,
 .mode-card h3,
@@ -627,6 +689,10 @@ a {
     padding: 1.25rem;
   }
 
+  .demo-banner {
+    margin: 1.25rem 1.25rem 0;
+  }
+
   .zone-form-grid {
     grid-template-columns: 1fr;
   }
@@ -636,7 +702,9 @@ a {
   }
 
   .zone-editor__toolbar,
-  .zone-editor__meta {
+  .zone-editor__meta,
+  .demo-banner__header,
+  .demo-banner__grid {
     flex-direction: column;
     align-items: flex-start;
   }

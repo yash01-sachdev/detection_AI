@@ -2,12 +2,12 @@ import { useEffect, useMemo, useState } from 'react'
 
 import { Panel } from '../../components/shared/Panel'
 import { EmptyState } from '../../components/shared/EmptyState'
-import { API_BASE_URL, apiRequest } from '../../lib/api/client'
+import { apiRequest } from '../../lib/api/client'
 import { withSiteId } from '../../lib/api/siteScope'
+import { resolveMediaUrl } from '../../lib/media'
 import type { Camera, LiveMonitorStatus, WorkerAssignment, Zone } from '../../types/models'
 import { useSiteContext } from '../sites/SiteContext'
 
-const API_ROOT = API_BASE_URL.replace(/\/api\/v1\/?$/, '')
 const DEFAULT_WORKER_NAME = 'detection-ai-worker'
 
 function formatTimestamp(value: string | null) {
@@ -99,8 +99,7 @@ export function LivePage() {
       return ''
     }
 
-    const cacheKey = encodeURIComponent(status.frame_updated_at ?? 'latest')
-    return `${API_ROOT}${status.frame_url}?t=${cacheKey}`
+    return resolveMediaUrl(status.frame_url, status.frame_updated_at ?? 'latest')
   }, [status])
 
   const activeWorkerName = useMemo(() => {

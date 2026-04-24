@@ -1,4 +1,4 @@
-import { useLocation } from 'react-router-dom'
+import { Link, useLocation } from 'react-router-dom'
 
 import { useAuth } from '../../features/auth/AuthContext'
 import { useSiteContext } from '../../features/sites/SiteContext'
@@ -17,7 +17,7 @@ const PAGE_TITLES: Record<string, string> = {
 
 export function Header() {
   const location = useLocation()
-  const { user, logout } = useAuth()
+  const { isDemoMode, user, logout } = useAuth()
   const { sites, selectedSiteId, setSelectedSiteId, isLoading } = useSiteContext()
 
   return (
@@ -43,12 +43,18 @@ export function Header() {
           </select>
         </label>
         <div className="user-chip">
-          <span>{user?.full_name}</span>
-          <small>{user?.role}</small>
+          <span>{isDemoMode ? 'Demo Visitor' : user?.full_name}</span>
+          <small>{isDemoMode ? 'read-only access' : user?.role}</small>
         </div>
-        <button className="ghost-button" onClick={logout} type="button">
-          Log out
-        </button>
+        {isDemoMode ? (
+          <Link className="ghost-button" to="/login">
+            Sign in
+          </Link>
+        ) : (
+          <button className="ghost-button" onClick={logout} type="button">
+            Log out
+          </button>
+        )}
       </div>
     </header>
   )

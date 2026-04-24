@@ -3,8 +3,9 @@ import type { FormEvent } from 'react'
 
 import { EmptyState } from '../../components/shared/EmptyState'
 import { Panel } from '../../components/shared/Panel'
-import { API_BASE_URL, apiRequest } from '../../lib/api/client'
+import { apiRequest } from '../../lib/api/client'
 import { withSiteId } from '../../lib/api/siteScope'
+import { resolveMediaUrl } from '../../lib/media'
 import type {
   Employee,
   EmployeeAttendanceDay,
@@ -18,7 +19,6 @@ import type {
 } from '../../types/models'
 import { useSiteContext } from '../sites/SiteContext'
 
-const API_ROOT = API_BASE_URL.replace(/\/api\/v1\/?$/, '')
 const weekdayOptions = [
   { key: 'mon', label: 'Mon' },
   { key: 'tue', label: 'Tue' },
@@ -585,7 +585,7 @@ function StaffEmployeesPage({
                           <img
                             key={profile.id}
                             className="employee-face-thumb"
-                            src={`${API_ROOT}${profile.source_image_path}`}
+                            src={resolveMediaUrl(profile.source_image_path)}
                             alt={`${employee.first_name} ${employee.last_name}`}
                           />
                         ))}
@@ -1006,7 +1006,7 @@ function HomeKnownPeoplePage({
                       <img
                         key={profile.id}
                         className="employee-face-thumb"
-                        src={`${API_ROOT}${profile.source_image_path}`}
+                        src={resolveMediaUrl(profile.source_image_path)}
                         alt={person.display_name}
                       />
                     ))}
